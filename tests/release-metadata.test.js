@@ -14,7 +14,7 @@ test("发布元数据指向真实 GitHub 仓库", async () => {
   const packageJson = JSON.parse(await readProjectFile("package.json"));
 
   assert.equal(manifest.homePage, REPOSITORY_URL);
-  assert.equal(manifest.version, "0.1.0-rc.4");
+  assert.equal(manifest.version, "0.1.0-rc.5");
   assert.equal(packageJson.version, manifest.version);
   assert.equal(packageJson.homepage, REPOSITORY_URL);
   assert.equal(packageJson.repository.url, `git+${REPOSITORY_URL}.git`);
@@ -73,4 +73,16 @@ test("扩展信息弹窗保留用户确认的原有提示", async () => {
   const source = await readProjectFile("src/ui/extension-info.js");
 
   assert.ok(source.includes("本扩展可免费使用，禁止任何形式的商业用途。"));
+});
+
+test("设置面板使用轻量版本信息布局并保留独立更新入口", async () => {
+  const html = await readProjectFile("settings.html");
+  const infoButton = html.match(/<button\s+id="boxed-lllllabc-info-toggle"[\s\S]*?>/)?.[0] ?? "";
+
+  assert.ok(html.includes('id="boxed-lllllabc-update-hint"'));
+  assert.ok(html.includes("有新版本可更新！"));
+  assert.ok(html.includes('class="boxed-lllllabc-meta-separator"'));
+  assert.match(infoButton, /class="boxed-lllllabc-meta-link"/);
+  assert.doesNotMatch(infoButton, /menu_button/);
+  assert.ok(html.includes('id="boxed-lllllabc-update-available"'));
 });

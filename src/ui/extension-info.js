@@ -30,6 +30,9 @@ export async function loadAndRenderExtensionInfo({ manifestUrl, fetchImpl = glob
 }
 
 export function renderUpdateState(state) {
+  const hint = document.querySelector("#boxed-lllllabc-update-hint");
+  if (hint) hint.hidden = state !== "available";
+
   const button = document.querySelector("#boxed-lllllabc-update-available");
   if (!button) return;
   const visible = state !== "hidden";

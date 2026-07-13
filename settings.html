@@ -3,6 +3,12 @@
     <div class="inline-drawer-toggle inline-drawer-header">
       <div class="boxed-lllllabc-header-title">
         <b>箱装辣白菜</b>
+        <span
+          id="boxed-lllllabc-update-hint"
+          class="boxed-lllllabc-update-hint"
+          aria-live="polite"
+          hidden
+        >有新版本可更新！</span>
       </div>
       <div class="boxed-lllllabc-header-side">
         <span id="boxed-lllllabc-settings-state" class="boxed-lllllabc-pill">未初始化</span>
@@ -14,17 +20,17 @@
       <div class="boxed-lllllabc-content">
         <section class="boxed-lllllabc-extension-meta" aria-label="扩展版本与信息">
           <div class="boxed-lllllabc-extension-meta-line">
-            <span id="boxed-lllllabc-version">Ver 0.1.0</span>
-            <div class="boxed-lllllabc-extension-meta-actions">
+            <div class="boxed-lllllabc-extension-meta-copy">
+              <span id="boxed-lllllabc-version">Ver 0.1.0</span>
+              <span class="boxed-lllllabc-meta-separator" aria-hidden="true"></span>
               <button
                 id="boxed-lllllabc-info-toggle"
-                class="menu_button boxed-lllllabc-meta-button"
+                class="boxed-lllllabc-meta-link"
                 type="button"
                 aria-haspopup="dialog"
-              >
-                <i class="fa-solid fa-circle-info" aria-hidden="true"></i>
-                <span>扩展信息</span>
-              </button>
+              >扩展信息</button>
+            </div>
+            <div class="boxed-lllllabc-extension-meta-actions">
               <button
                 id="boxed-lllllabc-update-available"
                 class="menu_button boxed-lllllabc-meta-button boxed-lllllabc-update-button"
