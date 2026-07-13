@@ -1,0 +1,33 @@
+# 本地协作工具
+.agents/
+.codex/
+
+# 依赖与测试产物
+node_modules/
+coverage/
+*.log
+npm-debug.log*
+
+# 本地配置与编辑器
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+*.tmp
+*.swp
+*~
+
+# 聊天、备份与本地数据库
+*.jsonl
+*.jsonl.*
+*.bak
+*.backup
+*.db
+*.sqlite
+*.sqlite3
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,91 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { buildChatIdentity } from "../src/identity.js";
+
+test("为单人聊天生成稳定 chatKey", () => {
+  const identity = buildChatIdentity({
+    characterId: 0,
+    chatId: "chat-a",
+    characters: [
+      {
+        name: "测试角色",
+        avatar: "tester.png",
+      },
+    ],
+  });
+
+  assert.equal(identity.ok, true);
+  assert.equal(identity.chatKey, "character:tester.png:chat-a");
+  assert.equal(identity.meta.chatType, "character");
+  assert.equal(identity.meta.characterName, "测试角色");
+  assert.deepEqual(identity.legacyChatKeys, ["character:0:chat-a"]);
+});
+
+test("为群聊生成独立命名空间 chatKey", () => {
+  const identity = buildChatIdentity({
+    groupId: "group-1",
+    chatFile: "group-chat.jsonl",
+    groups: [
+      {
+        id: "group-1",
+        name: "测试群聊",
+      },
+    ],
+  });
+
+  assert.equal(identity.ok, true);
+  assert.equal(identity.chatKey, "group:group-1:group-chat.jsonl");
+  assert.equal(identity.meta.chatType, "group");
+  assert.equal(identity.meta.groupName, "测试群聊");
+});
+
+test("同名聊天在有强标识时不会冲突", () => {
+  const first = buildChatIdentity({
+    characterId: 1,
+    chatId: "chat-a",
+    characters: [{ name: "同名" }, { name: "同名" }],
+  });
+  const second = buildChatIdentity({
+    characterId: 2,
+    chatId: "chat-a",
+    characters: [{ name: "同名" }, { name: "同名" }, { name: "同名" }],
+  });
+
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+  assert.notEqual(first.chatKey, second.chatKey);
+});
+
+test("角色数组顺序变化时仍使用头像文件名识别同一角色", () => {
+  const first = buildChatIdentity({
+    characterId: 0,
+    chatId: "chat-a",
+    chatMetadata: { integrity: "integrity-a" },
+    characters: [
+      { name: "测试角色", avatar: "tester.png" },
+      { name: "其他角色", avatar: "other.png" },
+    ],
+  });
+  const second = buildChatIdentity({
+    characterId: 1,
+    chatId: "chat-a",
+    chatMetadata: { integrity: "integrity-a" },
+    characters: [
+      { name: "其他角色", avatar: "other.png" },
+      { name: "测试角色", avatar: "tester.png" },
+    ],
+  });
+
+  assert.equal(first.chatKey, "character:tester.png:chat-a");
+  assert.equal(second.chatKey, first.chatKey);
+  assert.equal(second.meta.chatIntegrity, "integrity-a");
+});
+
+test("身份信息不足时拒绝备份", () => {
+  const identity = buildChatIdentity({
+    chat: [{ mes: "hello" }],
+  });
+
+  assert.equal(identity.ok, false);
+});

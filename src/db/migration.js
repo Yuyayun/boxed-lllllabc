@@ -1,0 +1,68 @@
+import { INDEXES, STORES } from "./schema.js";
+
+export function migrateDatabase(db, transaction) {
+  let chatMeta;
+  if (!db.objectStoreNames.contains(STORES.chatMeta)) {
+    chatMeta = db.createObjectStore(STORES.chatMeta, {
+      keyPath: "chatKey",
+    });
+  } else {
+    chatMeta = transaction.objectStore(STORES.chatMeta);
+  }
+
+  if (!chatMeta.indexNames.contains("by_lastBackupAt")) {
+    chatMeta.createIndex("by_lastBackupAt", "lastBackupAt", { unique: false });
+  }
+
+  let recentMessages;
+  if (!db.objectStoreNames.contains(STORES.recentMessages)) {
+    recentMessages = db.createObjectStore(STORES.recentMessages, {
+      keyPath: ["chatKey", "messageIndex"],
+    });
+  } else {
+    recentMessages = transaction.objectStore(STORES.recentMessages);
+  }
+
+  if (!recentMessages.indexNames.contains(INDEXES.recentByChat)) {
+    recentMessages.createIndex(INDEXES.recentByChat, "chatKey", { unique: false });
+  }
+
+  let pendingChanges;
+  if (!db.objectStoreNames.contains(STORES.pendingChanges)) {
+    pendingChanges = db.createObjectStore(STORES.pendingChanges, {
+      keyPath: "id",
+    });
+  } else {
+    pendingChanges = transaction.objectStore(STORES.pendingChanges);
+  }
+
+  if (!pendingChanges.indexNames.contains(INDEXES.pendingByChat)) {
+    pendingChanges.createIndex(INDEXES.pendingByChat, "chatKey", { unique: false });
+  }
+
+  let fullMessages;
+  if (!db.objectStoreNames.contains(STORES.fullMessages)) {
+    fullMessages = db.createObjectStore(STORES.fullMessages, {
+      keyPath: ["chatKey", "messageIndex"],
+    });
+  } else {
+    fullMessages = transaction.objectStore(STORES.fullMessages);
+  }
+
+  if (!fullMessages.indexNames.contains(INDEXES.fullByChat)) {
+    fullMessages.createIndex(INDEXES.fullByChat, "chatKey", { unique: false });
+  }
+
+  let historicalChanges;
+  if (!db.objectStoreNames.contains(STORES.historicalChanges)) {
+    historicalChanges = db.createObjectStore(STORES.historicalChanges, {
+      keyPath: ["chatKey", "messageIndex"],
+    });
+  } else {
+    historicalChanges = transaction.objectStore(STORES.historicalChanges);
+  }
+
+  if (!historicalChanges.indexNames.contains(INDEXES.historicalByChat)) {
+    historicalChanges.createIndex(INDEXES.historicalByChat, "chatKey", { unique: false });
+  }
+}

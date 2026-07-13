@@ -1,0 +1,407 @@
+import { migrateDatabase } from "./migration.js";
+import { DB_NAME, DB_VERSION, INDEXES, STORES } from "./schema.js";
+import { buildCleanupMetaPatch, fingerprintBackupRecords } from "../backup/cleanup.js";
+import {
+  mergeIdentityMeta,
+  rekeyBackupRecord,
+  selectIdentityReconciliationSource,
+} from "./identity-reconciliation.js";
+import { filterValidStoreRecords, inspectBackupCatalogData } from "../storage/health.js";
+
+export function openBackupDatabase() {
+  if (!globalThis.indexedDB) {
+    return Promise.reject(new Error("IndexedDB 不可用。"));
+  }
+
+  return new Promise((resolve, reject) => {
+    const request = globalThis.indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onupgradeneeded = () => {
+      migrateDatabase(request.result, request.transaction);
+    };
+
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("打开 IndexedDB 失败。"));
+    request.onblocked = () => reject(new Error("IndexedDB 升级被其他页面阻塞。"));
+  });
+}
+
+export async function replaceRecentSnapshot(db, { meta, messages }) {
+  return runTransaction(db, [STORES.chatMeta, STORES.recentMessages], "readwrite", async (stores) => {
+    const chatMetaStore = stores.get(STORES.chatMeta);
+    const recentStore = stores.get(STORES.recentMessages);
+
+    await requestToPromise(chatMetaStore.put(meta));
+    await deleteRecentMessagesForChat(recentStore, meta.chatKey);
+
+    for (const message of messages) {
+      await requestToPromise(recentStore.put({
+        ...message,
+        chatKey: meta.chatKey,
+      }));
+    }
+  });
+}
+
+export async function putChatMeta(db, meta) {
+  return runTransaction(db, [STORES.chatMeta], "readwrite", async (stores) => {
+    await requestToPromise(stores.get(STORES.chatMeta).put(meta));
+  });
+}
+
+export async function getRecentMessages(db, chatKey) {
+  return runTransaction(db, [STORES.recentMessages], "readonly", async (stores) => {
+    const store = stores.get(STORES.recentMessages);
+    const index = store.index(INDEXES.recentByChat);
+    const messages = await requestToPromise(index.getAll(chatKey));
+    return filterValidStoreRecords(messages, "recentMessages").sort((a, b) => a.messageIndex - b.messageIndex);
+  });
+}
+
+export async function getFullMessages(db, chatKey) {
+  return runTransaction(db, [STORES.fullMessages], "readonly", async (stores) => {
+    const store = stores.get(STORES.fullMessages);
+    const index = store.index(INDEXES.fullByChat);
+    const messages = await requestToPromise(index.getAll(chatKey));
+    return filterValidStoreRecords(messages, "fullMessages").sort((a, b) => a.messageIndex - b.messageIndex);
+  });
+}
+
+export async function getHistoricalChanges(db, chatKey) {
+  return runTransaction(db, [STORES.historicalChanges], "readonly", async (stores) => {
+    const store = stores.get(STORES.historicalChanges);
+    const index = store.index(INDEXES.historicalByChat);
+    const records = await requestToPromise(index.getAll(chatKey));
+    return filterValidStoreRecords(records, "historicalChanges").sort((a, b) => a.messageIndex - b.messageIndex);
+  });
+}
+
+export async function putFullMessages(db, { chatKey, messages, meta }) {
+  const safeMessages = Array.isArray(messages) ? messages : [];
+  return runTransaction(db, [STORES.chatMeta, STORES.fullMessages], "readwrite", async (stores) => {
+    const messageStore = stores.get(STORES.fullMessages);
+    for (const message of safeMessages) {
+      await requestToPromise(messageStore.put({ ...message, chatKey }));
+    }
+
+    if (meta) {
+      await requestToPromise(stores.get(STORES.chatMeta).put(meta));
+    }
+  });
+}
+
+export async function putHistoricalChanges(db, records) {
+  const safeRecords = Array.isArray(records) ? records : [];
+  if (!safeRecords.length) {
+    return;
+  }
+
+  return runTransaction(db, [STORES.historicalChanges], "readwrite", async (stores) => {
+    const store = stores.get(STORES.historicalChanges);
+    for (const record of safeRecords) {
+      const key = [record.chatKey, record.messageIndex];
+      const previous = await requestToPromise(store.get(key));
+      await requestToPromise(store.put({
+        ...record,
+        firstCapturedAt: previous?.firstCapturedAt ?? record.firstCapturedAt,
+      }));
+    }
+  });
+}
+
+export async function replaceFullSnapshot(db, { chatKey, messages, meta }) {
+  const safeMessages = Array.isArray(messages) ? messages : [];
+  return runTransaction(db, [STORES.chatMeta, STORES.fullMessages], "readwrite", async (stores) => {
+    const messageStore = stores.get(STORES.fullMessages);
+    await deleteMessagesForChat(messageStore, INDEXES.fullByChat, chatKey);
+    for (const message of safeMessages) {
+      await requestToPromise(messageStore.put({ ...message, chatKey }));
+    }
+
+    if (meta) {
+      await requestToPromise(stores.get(STORES.chatMeta).put(meta));
+    }
+  });
+}
+
+export async function getChatMeta(db, chatKey) {
+  return runTransaction(db, [STORES.chatMeta], "readonly", async (stores) => {
+    return requestToPromise(stores.get(STORES.chatMeta).get(chatKey));
+  });
+}
+
+export async function getBackupCatalogData(db) {
+  const storeNames = [
+    STORES.chatMeta,
+    STORES.recentMessages,
+    STORES.pendingChanges,
+    STORES.fullMessages,
+    STORES.historicalChanges,
+  ];
+  return runTransaction(db, storeNames, "readonly", async (stores) => {
+    const [chatMeta, recentMessages, pendingChanges, fullMessages, historicalChanges] = await Promise.all([
+      requestToPromise(stores.get(STORES.chatMeta).getAll()),
+      requestToPromise(stores.get(STORES.recentMessages).getAll()),
+      requestToPromise(stores.get(STORES.pendingChanges).getAll()),
+      requestToPromise(stores.get(STORES.fullMessages).getAll()),
+      requestToPromise(stores.get(STORES.historicalChanges).getAll()),
+    ]);
+    return inspectBackupCatalogData({ chatMeta, recentMessages, pendingChanges, fullMessages, historicalChanges });
+  });
+}
+
+export async function reconcileChatIdentity(db, identity) {
+  if (!identity?.chatKey || !identity?.meta) {
+    throw new Error("无法识别要接续的聊天备份。");
+  }
+
+  const storeNames = [
+    STORES.chatMeta,
+    STORES.recentMessages,
+    STORES.pendingChanges,
+    STORES.fullMessages,
+    STORES.historicalChanges,
+  ];
+  return runTransaction(db, storeNames, "readwrite", async (stores) => {
+    const metaStore = stores.get(STORES.chatMeta);
+    const metas = await requestToPromise(metaStore.getAll());
+    const selection = selectIdentityReconciliationSource({ identity, metas });
+    const targetKey = identity.chatKey;
+
+    if (selection.status === "current") {
+      const currentMeta = metas.find((meta) => meta.chatKey === targetKey);
+      await requestToPromise(metaStore.put({
+        ...mergeIdentityMeta(currentMeta, identity.meta),
+        chatKey: targetKey,
+      }));
+      return selection;
+    }
+
+    if (selection.status !== "migrate") {
+      if (selection.status === "new") {
+        await requestToPromise(metaStore.put({
+          ...mergeIdentityMeta(null, identity.meta),
+          chatKey: targetKey,
+        }));
+      }
+      return selection;
+    }
+
+    const sourceKey = selection.sourceKey;
+    const configurations = [
+      { type: "recent", store: STORES.recentMessages, index: INDEXES.recentByChat },
+      { type: "pending", store: STORES.pendingChanges, index: INDEXES.pendingByChat },
+      { type: "full", store: STORES.fullMessages, index: INDEXES.fullByChat },
+      { type: "historical", store: STORES.historicalChanges, index: INDEXES.historicalByChat },
+    ];
+    const recordSets = await Promise.all(configurations.map(async (config) => {
+      const store = stores.get(config.store);
+      const index = store.index(config.index);
+      const [sourceRecords, targetRecords] = await Promise.all([
+        requestToPromise(index.getAll(sourceKey)),
+        requestToPromise(index.getAll(targetKey)),
+      ]);
+      return { ...config, store, sourceRecords, targetRecords };
+    }));
+
+    if (recordSets.some(({ targetRecords }) => targetRecords.length > 0)) {
+      return { status: "conflict", sourceKey, targetKey };
+    }
+
+    for (const { type, store, sourceRecords } of recordSets) {
+      for (const record of sourceRecords) {
+        await requestToPromise(store.put(rekeyBackupRecord(record, targetKey, type)));
+        await requestToPromise(store.delete(primaryKeyForRecord(record, type)));
+      }
+    }
+
+    const sourceMeta = metas.find((meta) => meta.chatKey === sourceKey);
+    await requestToPromise(metaStore.put({
+      ...mergeIdentityMeta(sourceMeta, identity.meta),
+      chatKey: targetKey,
+    }));
+    await requestToPromise(metaStore.delete(sourceKey));
+    return { ...selection, targetKey };
+  });
+}
+
+export async function deleteBackupTypeForChat(db, {
+  chatKey,
+  type,
+  expectedFingerprint,
+} = {}) {
+  const config = cleanupStoreConfig(type);
+  if (!chatKey || !config) {
+    throw new Error("无法识别要清理的聊天或备份类型。");
+  }
+  if (!expectedFingerprint) {
+    throw new Error("缺少清理预览指纹，请重新预览。");
+  }
+
+  return runTransaction(db, [STORES.chatMeta, config.store], "readwrite", async (stores) => {
+    const recordStore = stores.get(config.store);
+    const index = recordStore.index(config.index);
+    const records = await requestToPromise(index.getAll(chatKey));
+    if (fingerprintBackupRecords(records) !== expectedFingerprint) {
+      throw new Error("这类备份在预览后发生了变化，请重新预览再清理。");
+    }
+
+    const metaStore = stores.get(STORES.chatMeta);
+    const meta = await requestToPromise(metaStore.get(chatKey));
+    if (type === "full" && meta?.fullBackupState === "frozen") {
+      throw new Error("完整聊天备份已进入冻结保护状态，不能清理。");
+    }
+
+    const keys = await requestToPromise(index.getAllKeys(chatKey));
+    for (const key of keys) {
+      await requestToPromise(recordStore.delete(key));
+    }
+
+    if (meta) {
+      await requestToPromise(metaStore.put({
+        ...meta,
+        ...buildCleanupMetaPatch(type),
+        chatKey,
+      }));
+    }
+    return { deletedCount: keys.length, type, chatKey };
+  });
+}
+
+export async function putPendingChanges(db, records) {
+  const safeRecords = Array.isArray(records) ? records : [];
+  if (!safeRecords.length) {
+    return;
+  }
+
+  return runTransaction(db, [STORES.pendingChanges], "readwrite", async (stores) => {
+    const store = stores.get(STORES.pendingChanges);
+    for (const record of safeRecords) {
+      await requestToPromise(store.put(record));
+    }
+  });
+}
+
+export async function replacePendingChanges(db, { chatKey, records }) {
+  const safeRecords = Array.isArray(records) ? records : [];
+  return runTransaction(db, [STORES.pendingChanges], "readwrite", async (stores) => {
+    const store = stores.get(STORES.pendingChanges);
+    await deleteMessagesForChat(store, INDEXES.pendingByChat, chatKey);
+    for (const record of safeRecords) {
+      await requestToPromise(store.put(record));
+    }
+  });
+}
+
+export async function getPendingChanges(db, chatKey) {
+  return runTransaction(db, [STORES.pendingChanges], "readonly", async (stores) => {
+    const store = stores.get(STORES.pendingChanges);
+    const index = store.index(INDEXES.pendingByChat);
+    const records = await requestToPromise(index.getAll(chatKey));
+    return filterValidStoreRecords(records, "pendingChanges").sort(comparePendingRecords);
+  });
+}
+
+export async function deletePendingChanges(db, ids) {
+  const safeIds = Array.isArray(ids) ? ids : [];
+  if (!safeIds.length) {
+    return;
+  }
+
+  return runTransaction(db, [STORES.pendingChanges], "readwrite", async (stores) => {
+    const store = stores.get(STORES.pendingChanges);
+    for (const id of safeIds) {
+      await requestToPromise(store.delete(id));
+    }
+  });
+}
+
+export async function updateChatMetaSummary(db, chatKey, patch) {
+  return runTransaction(db, [STORES.chatMeta], "readwrite", async (stores) => {
+    const store = stores.get(STORES.chatMeta);
+    const current = await requestToPromise(store.get(chatKey));
+    await requestToPromise(store.put({
+      ...(current ?? { chatKey }),
+      ...patch,
+      chatKey,
+    }));
+  });
+}
+
+async function deleteRecentMessagesForChat(store, chatKey) {
+  return deleteMessagesForChat(store, INDEXES.recentByChat, chatKey);
+}
+
+async function deleteMessagesForChat(store, indexName, chatKey) {
+  const index = store.index(indexName);
+  const keys = await requestToPromise(index.getAllKeys(chatKey));
+
+  for (const key of keys) {
+    await requestToPromise(store.delete(key));
+  }
+}
+
+function runTransaction(db, storeNames, mode, callback) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(storeNames, mode);
+    const stores = new Map(storeNames.map((name) => [name, transaction.objectStore(name)]));
+    let callbackResult;
+
+    transaction.oncomplete = () => resolve(callbackResult);
+    transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB 事务失败。"));
+    transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB 事务中止。"));
+
+    Promise.resolve()
+      .then(() => callback(stores))
+      .then((result) => {
+        callbackResult = result;
+      })
+      .catch((error) => {
+        transaction.abort();
+        reject(error);
+      });
+  });
+}
+
+function requestToPromise(request) {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("IndexedDB 请求失败。"));
+  });
+}
+
+function comparePendingRecords(a, b) {
+  if (a.messageIndex === null && b.messageIndex === null) {
+    return String(a.id).localeCompare(String(b.id));
+  }
+
+  if (a.messageIndex === null) {
+    return 1;
+  }
+
+  if (b.messageIndex === null) {
+    return -1;
+  }
+
+  return a.messageIndex - b.messageIndex;
+}
+
+function cleanupStoreConfig(type) {
+  if (type === "recent") {
+    return { store: STORES.recentMessages, index: INDEXES.recentByChat };
+  }
+  if (type === "full") {
+    return { store: STORES.fullMessages, index: INDEXES.fullByChat };
+  }
+  if (type === "historical") {
+    return { store: STORES.historicalChanges, index: INDEXES.historicalByChat };
+  }
+  return null;
+}
+
+function primaryKeyForRecord(record, type) {
+  if (type === "pending") {
+    return record.id;
+  }
+  return [record.chatKey, record.messageIndex];
+}

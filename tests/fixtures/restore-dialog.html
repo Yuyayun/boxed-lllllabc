@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>恢复预览测试</title>
+  <link rel="stylesheet" href="../../style.css" />
+  <style>
+    :root {
+      --SmartThemeBodyColor: #ececec;
+      --SmartThemeChatTintColor: #202225;
+      --SmartThemeBlurTintColor: #242629;
+      --SmartThemeBorderColor: #6e7378;
+      --SmartThemeQuoteColor: #8fb7a5;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      background: #17191b;
+      color: var(--SmartThemeBodyColor);
+      font-family: system-ui, sans-serif;
+    }
+
+    .menu_button {
+      font: inherit;
+    }
+  </style>
+</head>
+<body>
+  <script type="module">
+    import { canonicalizeMessage } from "../../src/backup/canonicalize.js";
+    import { openRestoreDialog } from "../../src/ui/restore-dialog.js";
+
+    const backup = (messageIndex, text, name) => canonicalizeMessage({
+      mes: text,
+      name,
+      swipes: [text, `${text}的另一个候选回复`],
+      swipe_id: 0,
+    }, messageIndex);
+
+    const pendingMessage = backup(9, "尚未保存的第 9 层内容", "角色");
+    const plan = {
+      source: "recent",
+      chatKey: "fixture",
+      baseChatLength: 9,
+      replacements: [],
+      appends: [
+        { messageIndex: 9, backup: backup(9, "最近备份中的第 9 层内容", "角色") },
+        { messageIndex: 10, backup: backup(10, "最近备份中的第 10 层内容", "用户") },
+        { messageIndex: 11, backup: backup(11, "最近备份中的第 11 层内容", "角色") },
+      ],
+      pendingConflicts: [{ messageIndex: 9, message: pendingMessage }],
+      totalCount: 3,
+    };
+
+    openRestoreDialog({
+      plan,
+      chatName: "恢复预览测试聊天",
+      currentChat: Array.from({ length: 9 }, (_, index) => ({ mes: `当前第 ${index} 层` })),
+      onConfirm: async () => ({ ok: false, reason: "测试页不会执行真实恢复。" }),
+    });
+  </script>
+</body>
+</html>
