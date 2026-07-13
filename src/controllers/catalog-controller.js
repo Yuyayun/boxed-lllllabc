@@ -17,6 +17,7 @@ export function createCatalogController({
   openCleanupDialog = openBackupCleanupDialog,
   refreshVisiblePanel = async () => {},
   onCatalogChanged = async () => {},
+  waitForDialogPaint = waitForNextPaint,
 } = {}) {
   async function refreshCatalog() {
     renderDialog({ loading: true });
@@ -38,6 +39,7 @@ export function createCatalogController({
 
   async function openCatalog() {
     openDialog({ onRefresh: refreshCatalog, onOpenCleanup: openCleanup });
+    await waitForDialogPaint();
     return refreshCatalog();
   }
 
@@ -93,4 +95,13 @@ export function createCatalogController({
     openCleanup,
     refreshCatalog,
   };
+}
+
+export function waitForNextPaint() {
+  if (typeof globalThis.requestAnimationFrame !== "function") {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    globalThis.requestAnimationFrame(() => globalThis.setTimeout(resolve, 0));
+  });
 }

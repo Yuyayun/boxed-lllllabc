@@ -16,6 +16,9 @@ test("手机端全部聊天备份弹层保留安全区和底部关闭入口", as
   assert.match(style, /--boxed-lllllabc-catalog-mobile-top-clearance/);
   assert.match(style, /env\(safe-area-inset-top, 0px\)/);
   assert.match(style, /place-items: end center/);
+  assert.match(style, /\.boxed-lllllabc-catalog-dialog\s*\{[\s\S]*?inset: 0;/);
+  assert.match(style, /\.boxed-lllllabc-catalog-frame\s*\{[\s\S]*?max-height: 100%;/);
+  assert.doesNotMatch(style, /\.boxed-lllllabc-catalog-dialog\s*\{[\s\S]*?inset: auto 0 0;/);
   assert.match(style, /\.boxed-lllllabc-catalog-mobile-footer\s*\{[\s\S]*?display: flex/);
   assert.match(style, /\.boxed-lllllabc-catalog-mobile-close\s*\{[\s\S]*?min-height: 44px/);
 });

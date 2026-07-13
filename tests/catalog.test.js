@@ -246,3 +246,23 @@ test("全局备份控制器读取失败时显示中文错误并关闭数据库",
   assert.deepEqual(states.at(-1), { error: "数据库读取失败" });
   assert.equal(closed, 1);
 });
+
+test("打开全部聊天备份时先让弹层完成一帧显示再读取索引", async () => {
+  const calls = [];
+  const controller = createCatalogController({
+    openDialog: () => calls.push("open"),
+    waitForDialogPaint: async () => calls.push("paint"),
+    openDatabase: async () => {
+      calls.push("database");
+      return { close: () => calls.push("close") };
+    },
+    readCatalogData: async () => ({ chatMeta: [] }),
+    buildCatalog: () => ({ chatCount: 0, chats: [] }),
+    renderDialog: (state) => calls.push(state.loading ? "loading" : "catalog"),
+  });
+
+  const result = await controller.openCatalog();
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, ["open", "paint", "loading", "database", "catalog", "close"]);
+});
