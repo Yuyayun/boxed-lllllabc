@@ -1599,8 +1599,11 @@
     );
     inset: 0;
     place-items: end center;
+    height: 100vh;
+    height: 100dvh;
     min-width: 0;
-    min-height: 0;
+    min-height: 100vh;
+    min-height: 100dvh;
     padding:
       var(--boxed-lllllabc-catalog-mobile-top-clearance)
       8px
