@@ -157,6 +157,7 @@ function finishEntry(entry) {
     full,
     historical,
     isFrozen: meta.fullBackupState === "frozen",
+    isAwaitingConfirmation: meta.fullBackupState === "awaiting-confirmation",
   };
 }
 

@@ -31,7 +31,8 @@ export async function replaceRecentSnapshot(db, { meta, messages }) {
     const chatMetaStore = stores.get(STORES.chatMeta);
     const recentStore = stores.get(STORES.recentMessages);
 
-    await requestToPromise(chatMetaStore.put(meta));
+    const previousMeta = await requestToPromise(chatMetaStore.get(meta.chatKey));
+    await requestToPromise(chatMetaStore.put(mergeRecentSnapshotMeta(previousMeta, meta)));
     await deleteRecentMessagesForChat(recentStore, meta.chatKey);
 
     for (const message of messages) {
@@ -41,6 +42,14 @@ export async function replaceRecentSnapshot(db, { meta, messages }) {
       }));
     }
   });
+}
+
+export function mergeRecentSnapshotMeta(previousMeta, recentMeta) {
+  return {
+    ...(previousMeta ?? {}),
+    ...(recentMeta ?? {}),
+    chatKey: recentMeta?.chatKey ?? previousMeta?.chatKey,
+  };
 }
 
 export async function putChatMeta(db, meta) {
@@ -248,8 +257,10 @@ export async function deleteBackupTypeForChat(db, {
 
     const metaStore = stores.get(STORES.chatMeta);
     const meta = await requestToPromise(metaStore.get(chatKey));
-    if (type === "full" && meta?.fullBackupState === "frozen") {
-      throw new Error("完整聊天备份已进入冻结保护状态，不能清理。");
+    if (type === "full" && ["frozen", "awaiting-confirmation"].includes(meta?.fullBackupState)) {
+      throw new Error(meta.fullBackupState === "frozen"
+        ? "完整聊天备份已进入冻结保护状态，不能清理。"
+        : "完整聊天备份正在等待后端确认，不能清理。");
     }
 
     const keys = await requestToPromise(index.getAllKeys(chatKey));

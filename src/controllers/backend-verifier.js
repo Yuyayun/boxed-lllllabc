@@ -13,6 +13,8 @@ export function createBackendVerifier({
   readCurrentPending,
   updateBackendMeta,
   createDisplayStatus,
+  confirmFullBackup = async () => null,
+  needsFullBackupConfirmation = async () => false,
   readBackend = readBackendChat,
   retryDelays = [2000, 5000, 10000],
 }) {
@@ -70,14 +72,21 @@ export function createBackendVerifier({
 
     const pending = await readCurrentPending(chatKey);
     if (!pending.length) {
-      const status = await prioritizeFullBackupStatus(
+      if (!await needsFullBackupConfirmation(chatKey)) {
+        const status = await prioritizeFullBackupStatus(
+          chatKey,
+          createDisplayStatus("saved", "后端已保存"),
+        );
+        setStatus(status);
+        await updateBackendMeta(chatKey, "saved", []);
+        await refreshVisiblePanel();
+        return status;
+      }
+      return verifyBackendSnapshotNow({
         chatKey,
-        createDisplayStatus("saved", "后端已保存"),
-      );
-      setStatus(status);
-      await updateBackendMeta(chatKey, "saved", []);
-      await refreshVisiblePanel();
-      return status;
+        expectedChatHash: hashCanonicalChat(current.chat),
+        retryIndex,
+      });
     }
 
     setStatus(await prioritizeFullBackupStatus(
@@ -97,18 +106,36 @@ export function createBackendVerifier({
         });
       }
 
+      const needsFullConfirmation = await needsFullBackupConfirmation(chatKey);
+      const latestCurrent = needsFullConfirmation ? getContextReader().readCurrentChat() : current;
+      if (needsFullConfirmation && (!latestCurrent.ok || latestCurrent.identity.chatKey !== chatKey)) {
+        return getLatestStatus();
+      }
+      const backendMatchesCurrent = needsFullConfirmation
+        && hashCanonicalChat(stripChatHeader(backend.chat)) === hashCanonicalChat(latestCurrent.chat);
       const comparison = comparePendingWithBackend(pending, backend.chat);
-      if (comparison.confirmedIds.length) {
+      const confirmedIds = backendMatchesCurrent
+        ? pending.map((record) => record?.id).filter(Boolean)
+        : comparison.confirmedIds;
+      if (confirmedIds.length) {
         const db = await openBackupDatabase();
         try {
-          await deletePendingChanges(db, comparison.confirmedIds);
+          await deletePendingChanges(db, confirmedIds);
         } finally {
           db.close();
         }
       }
 
       const latestPending = await readCurrentPending(chatKey);
-      if (!latestPending.length) {
+      if (!latestPending.length && (!needsFullConfirmation || backendMatchesCurrent)) {
+        if (needsFullConfirmation) {
+          const fullStatus = await confirmFullBackup({ current: latestCurrent });
+          if (fullStatus?.code === "db-error") {
+            setStatus(fullStatus);
+            await refreshVisiblePanel();
+            return fullStatus;
+          }
+        }
         const status = await prioritizeFullBackupStatus(
           chatKey,
           createDisplayStatus("saved", "后端已保存"),
@@ -123,7 +150,7 @@ export function createBackendVerifier({
         chatKey,
         pending: latestPending,
         retryIndex,
-        detail: "后端内容尚未与前端一致。",
+        detail: "后端内容尚未与当前聊天完全一致。",
         outcome: "unconfirmed",
       });
     } catch (error) {
@@ -165,6 +192,26 @@ export function createBackendVerifier({
     try {
       const backend = await readBackend({ current });
       if (backend.ok && hashCanonicalChat(stripChatHeader(backend.chat)) === expectedChatHash) {
+        const latestCurrent = getContextReader().readCurrentChat();
+        if (!latestCurrent.ok
+          || latestCurrent.identity.chatKey !== chatKey
+          || hashCanonicalChat(latestCurrent.chat) !== expectedChatHash) {
+          const status = createDisplayStatus(
+            "unconfirmed",
+            "后端内容待确认",
+            "核对期间当前聊天又发生了变化，请等待下一次核对。",
+          );
+          setStatus(status);
+          await updateBackendMeta(chatKey, "unconfirmed", []);
+          await refreshVisiblePanel();
+          return status;
+        }
+        const fullStatus = await confirmFullBackup({ current: latestCurrent });
+        if (fullStatus?.code === "db-error") {
+          setStatus(fullStatus);
+          await refreshVisiblePanel();
+          return fullStatus;
+        }
         const status = await prioritizeFullBackupStatus(
           chatKey,
           createDisplayStatus("saved", "后端已保存"),

@@ -44,6 +44,15 @@ test("冻结完整备份和空备份类型明确禁止清理", () => {
   assert.match(emptyHistorical.blockedReason, /当前没有历史楼层改动备份/);
 });
 
+test("等待后端确认的完整备份暂时禁止清理", () => {
+  const awaiting = buildChat({ awaiting: true });
+  const plan = createBackupCleanupPlan({ chat: awaiting, type: "full" });
+
+  assert.equal(awaiting.isAwaitingConfirmation, true);
+  assert.equal(plan.canConfirm, false);
+  assert.match(plan.blockedReason, /等待后端确认/);
+});
+
 test("清理预览后目标记录变化会拒绝旧计划", () => {
   const chat = buildChat();
   const plan = createBackupCleanupPlan({ chat, type: "recent" });
@@ -65,6 +74,7 @@ test("清理元数据补丁不会残留完整备份冻结状态", () => {
   });
   assert.equal(buildCleanupMetaPatch("full").fullBackupState, "empty");
   assert.equal(buildCleanupMetaPatch("full").fullBackupIncident, null);
+  assert.equal(buildCleanupMetaPatch("full").fullBackupPendingMessageCount, null);
   assert.deepEqual(buildCleanupMetaPatch("historical"), { historicalUpdatedAt: null });
 });
 
@@ -119,6 +129,25 @@ test("完整备份在确认前进入冻结状态时数据库事务拒绝删除",
   assert.deepEqual(state.deletedKeys, []);
 });
 
+test("完整备份等待后端确认时数据库事务拒绝删除", async () => {
+  const records = [record(0), record(1)];
+  const { db, state } = createCleanupDatabase({
+    records,
+    type: "full",
+    meta: { chatKey, fullBackupState: "awaiting-confirmation" },
+  });
+
+  await assert.rejects(
+    deleteBackupTypeForChat(db, {
+      chatKey,
+      type: "full",
+      expectedFingerprint: fingerprintBackupRecords(records),
+    }),
+    /等待后端确认/,
+  );
+  assert.deepEqual(state.deletedKeys, []);
+});
+
 test("全局控制器清理成功后关闭数据库并刷新索引与当前面板", async () => {
   const data = makeData();
   const calls = [];
@@ -148,17 +177,17 @@ test("全局控制器清理成功后关闭数据库并刷新索引与当前面�
   assert.equal(calls.at(-1)[0], "panel");
 });
 
-function buildChat({ frozen = false } = {}) {
-  return buildBackupCatalog(makeData({ frozen })).chats[0];
+function buildChat({ frozen = false, awaiting = false } = {}) {
+  return buildBackupCatalog(makeData({ frozen, awaiting })).chats[0];
 }
 
-function makeData({ frozen = false, extraRecent = false } = {}) {
+function makeData({ frozen = false, awaiting = false, extraRecent = false } = {}) {
   return {
     chatMeta: [{
       chatKey,
       chatDisplayName: "清理测试聊天",
       characterName: "测试角色",
-      fullBackupState: frozen ? "frozen" : "active",
+      fullBackupState: frozen ? "frozen" : awaiting ? "awaiting-confirmation" : "active",
       lastBackupAt: "2026-07-12T00:00:00.000Z",
     }],
     recentMessages: [record(4), record(5), ...(extraRecent ? [record(6)] : [])],

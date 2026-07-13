@@ -71,7 +71,9 @@ function initializeControllers() {
     refreshVisiblePanel,
     clearScheduledVerification: () => backendVerifier?.clearScheduledVerification(),
     verifyBackendNow: (options) => backendVerifier.verifyBackendNow(options),
+    verifyBackendSnapshotNow: (options) => backendVerifier.verifyBackendSnapshotNow(options),
     scheduleBackendVerification: (...args) => backendVerifier.scheduleBackendVerification(...args),
+    scheduleBackendSnapshotVerification: (...args) => backendVerifier.scheduleBackendSnapshotVerification(...args),
     verificationRetryLimit: verifyRetryDelays.length,
   });
 
@@ -85,6 +87,8 @@ function initializeControllers() {
     readCurrentPending: (...args) => backupCoordinator.readCurrentPending(...args),
     updateBackendMeta: (...args) => backupCoordinator.updateBackendMeta(...args),
     createDisplayStatus: (...args) => backupCoordinator.createDisplayStatus(...args),
+    confirmFullBackup: (...args) => backupCoordinator.confirmFullBackupAfterBackendVerification(...args),
+    needsFullBackupConfirmation: (...args) => backupCoordinator.needsFullBackupConfirmation(...args),
     retryDelays: verifyRetryDelays,
   });
 

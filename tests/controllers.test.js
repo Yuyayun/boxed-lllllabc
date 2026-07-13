@@ -56,28 +56,61 @@ test("备份协调器在聊天身份不足时停止写入", async () => {
   assert.equal(calls.at(-1), "panel");
 });
 
-test("后端核对没有 pending 时写入已保存状态", async () => {
+test("后端核对没有 pending 时仍核对整聊并接续完整备份", async () => {
+  const chat = [{ mes: "当前聊天" }];
   const calls = [];
-  const savedStatus = { code: "saved", shortText: "后端已保存" };
   const verifier = createBackendVerifier({
     getContextReader: () => ({
-      readCurrentChat: () => ({ ok: true, identity: { chatKey: "chat-a" } }),
+      readCurrentChat: () => ({ ok: true, chat, identity: { chatKey: "chat-a" } }),
     }),
     getSettings: () => ({ enabled: true }),
     getLatestStatus: () => null,
-    setStatus: (status) => calls.push(["status", status]),
+    setStatus: (status) => calls.push(["status", status.code]),
     refreshVisiblePanel: async () => calls.push(["panel"]),
     prioritizeFullBackupStatus: async (_chatKey, status) => status,
     readCurrentPending: async () => [],
     updateBackendMeta: async (...args) => calls.push(["meta", ...args]),
-    createDisplayStatus: () => savedStatus,
+    createDisplayStatus: (code) => ({ code }),
+    confirmFullBackup: async ({ current }) => calls.push(["full", current.chat.length]),
+    needsFullBackupConfirmation: async () => true,
+    readBackend: async () => ({ ok: true, chat: [{ chat_metadata: {} }, ...structuredClone(chat)] }),
   });
 
   const status = await verifier.verifyBackendNow({ chatKey: "chat-a" });
 
-  assert.equal(status, savedStatus);
+  assert.equal(status.code, "saved");
   assert.deepEqual(calls, [
-    ["status", savedStatus],
+    ["status", "checking"],
+    ["full", 1],
+    ["status", "saved"],
+    ["meta", "chat-a", "saved", []],
+    ["panel"],
+  ]);
+});
+
+test("普通无 pending 状态不会额外执行整聊读取", async () => {
+  const calls = [];
+  const verifier = createBackendVerifier({
+    getContextReader: () => ({
+      readCurrentChat: () => ({ ok: true, chat: [{ mes: "当前聊天" }], identity: { chatKey: "chat-a" } }),
+    }),
+    getSettings: () => ({ enabled: true }),
+    getLatestStatus: () => null,
+    setStatus: (status) => calls.push(["status", status.code]),
+    refreshVisiblePanel: async () => calls.push(["panel"]),
+    prioritizeFullBackupStatus: async (_chatKey, status) => status,
+    readCurrentPending: async () => [],
+    updateBackendMeta: async (...args) => calls.push(["meta", ...args]),
+    createDisplayStatus: (code) => ({ code }),
+    needsFullBackupConfirmation: async () => false,
+    readBackend: async () => { throw new Error("普通状态不应读取整聊"); },
+  });
+
+  const status = await verifier.verifyBackendNow({ chatKey: "chat-a" });
+
+  assert.equal(status.code, "saved");
+  assert.deepEqual(calls, [
+    ["status", "saved"],
     ["meta", "chat-a", "saved", []],
     ["panel"],
   ]);
@@ -116,6 +149,67 @@ test("无 pending 的请求保存使用整聊哈希读取后端核对", async ()
     ["meta", "chat-a", "saved", []],
     ["panel"],
   ]);
+});
+
+test("后端整聊尚未一致时不会接续完整备份", async () => {
+  const chat = [{ mes: "前端内容" }];
+  let confirmations = 0;
+  const verifier = createBackendVerifier({
+    getContextReader: () => ({
+      readCurrentChat: () => ({ ok: true, chat, identity: { chatKey: "chat-a" } }),
+    }),
+    getSettings: () => ({ enabled: true }),
+    getLatestStatus: () => null,
+    setStatus: () => {},
+    refreshVisiblePanel: async () => {},
+    prioritizeFullBackupStatus: async (_chatKey, status) => status,
+    readCurrentPending: async () => [],
+    updateBackendMeta: async () => {},
+    createDisplayStatus: (code) => ({ code }),
+    confirmFullBackup: async () => { confirmations += 1; },
+    readBackend: async () => ({ ok: true, chat: [{ mes: "后端旧内容" }] }),
+    retryDelays: [],
+  });
+
+  const status = await verifier.verifyBackendSnapshotNow({
+    chatKey: "chat-a",
+    expectedChatHash: hashCanonicalChat(chat),
+  });
+
+  assert.equal(status.code, "unconfirmed");
+  assert.equal(confirmations, 0);
+});
+
+test("后端读取期间聊天继续变化时拒绝用旧响应确认完整备份", async () => {
+  const chat = [{ mes: "请求开始时的内容" }];
+  const expectedChatHash = hashCanonicalChat(chat);
+  let confirmations = 0;
+  const verifier = createBackendVerifier({
+    getContextReader: () => ({
+      readCurrentChat: () => ({ ok: true, chat, identity: { chatKey: "chat-a" } }),
+    }),
+    getSettings: () => ({ enabled: true }),
+    getLatestStatus: () => null,
+    setStatus: () => {},
+    refreshVisiblePanel: async () => {},
+    prioritizeFullBackupStatus: async (_chatKey, status) => status,
+    readCurrentPending: async () => [],
+    updateBackendMeta: async () => {},
+    createDisplayStatus: (code) => ({ code }),
+    confirmFullBackup: async () => { confirmations += 1; },
+    readBackend: async () => {
+      chat.push({ mes: "请求期间新增的内容" });
+      return { ok: true, chat: [{ mes: "请求开始时的内容" }] };
+    },
+  });
+
+  const status = await verifier.verifyBackendSnapshotNow({
+    chatKey: "chat-a",
+    expectedChatHash,
+  });
+
+  assert.equal(status.code, "unconfirmed");
+  assert.equal(confirmations, 0);
 });
 
 test("取消后端核对定时器后不会执行旧任务", async () => {

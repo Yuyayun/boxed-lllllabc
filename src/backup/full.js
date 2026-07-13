@@ -27,6 +27,9 @@ export function createFullBackupDecision({
   currentChat = [],
   triggers = [],
   frozen = false,
+  frozenIncident = null,
+  awaitingConfirmation = false,
+  backendConfirmed = false,
   now = new Date().toISOString(),
 }) {
   const currentMessages = canonicalizeAll(currentChat, now);
@@ -43,9 +46,15 @@ export function createFullBackupDecision({
   }
 
   if (frozen) {
-    return matchesAll(existing, currentMessages)
-      ? { action: "unfreeze", messages: currentMessages, currentMessages, eventInfo }
-      : { action: "skip-frozen", messages: [], currentMessages, eventInfo };
+    if (matchesPrefix(existing, currentMessages)) {
+      return { action: "unfreeze", messages: currentMessages, currentMessages, eventInfo };
+    }
+    if (backendConfirmed
+      && frozenIncident?.kind === "unexpected-message-change"
+      && currentMessages.length >= existing.length) {
+      return { action: "reconcile", messages: currentMessages, currentMessages, eventInfo };
+    }
+    return { action: "skip-frozen", messages: [], currentMessages, eventInfo };
   }
 
   if (eventInfo.hasDelete) {
@@ -63,7 +72,14 @@ export function createFullBackupDecision({
   const targetIndexes = eventInfo.targetIndexes;
   const unexpectedIndex = findUnexpectedDifference(existing, currentMessages, targetIndexes);
   if (unexpectedIndex !== null) {
-    return freeze(existing, currentMessages, eventInfo, now, "unexpected-message-change", unexpectedIndex);
+    if (backendConfirmed) {
+      return { action: "reconcile", messages: currentMessages, currentMessages, eventInfo };
+    }
+    return awaitConfirmation(existing, currentMessages, eventInfo, now, unexpectedIndex);
+  }
+
+  if (backendConfirmed && awaitingConfirmation) {
+    return { action: "reconcile", messages: currentMessages, currentMessages, eventInfo };
   }
 
   if (currentMessages.length > existing.length) {
@@ -126,6 +142,26 @@ export function createFullBackupMeta({ identity, messages, reason, previousMeta 
     fullBackupLastReason: reason,
     fullBackupState: state,
     fullBackupIncident: incident,
+    fullBackupPendingMessageCount: null,
+  };
+}
+
+export function createFullBackupAwaitingMeta({
+  identity,
+  currentMessages,
+  previousMeta = {},
+  reason,
+  incident,
+}) {
+  const safeMessages = Array.isArray(currentMessages) ? currentMessages : [];
+  return {
+    ...previousMeta,
+    ...identity.meta,
+    chatKey: identity.chatKey,
+    fullBackupLastReason: reason,
+    fullBackupState: "awaiting-confirmation",
+    fullBackupIncident: incident,
+    fullBackupPendingMessageCount: safeMessages.length,
   };
 }
 
@@ -147,8 +183,8 @@ function isFirstMessage(args) {
   return Array.isArray(args) && args.includes("first_message");
 }
 
-function matchesAll(existing, current) {
-  return existing.length === current.length
+function matchesPrefix(existing, current) {
+  return current.length >= existing.length
     && existing.every((message, index) => message?.canonicalHash === current[index]?.canonicalHash);
 }
 
@@ -177,6 +213,22 @@ function freeze(existing, current, eventInfo, now, kind, differingIndex = null) 
       backupMessageCount: existing.length,
       observedMessageCount: current.length,
       backupUpdatedAt: existing.at(-1)?.backedUpAt ?? null,
+      differingIndex,
+    },
+  };
+}
+
+function awaitConfirmation(existing, current, eventInfo, now, differingIndex) {
+  return {
+    action: "await-confirmation",
+    messages: [],
+    currentMessages: current,
+    eventInfo,
+    incident: {
+      kind: "unexpected-message-change",
+      detectedAt: now,
+      previousCount: existing.length,
+      observedCount: current.length,
       differingIndex,
     },
   };

@@ -104,6 +104,9 @@ function formatFullBackupDetail(messages, meta, settings) {
       ? "已查看，完整备份仍保留，更新已暂停"
       : "聊天疑似异常缩短，完整备份已保留";
   }
+  if (meta.fullBackupState === "awaiting-confirmation") {
+    return `已保留 ${formatBackupRange(messages)} · 等待酒馆后端确认后接续`;
+  }
   return `完整聊天 · ${formatBackupRange(messages)} · 更新于 ${formatDate(meta.fullBackupAt)}`;
 }
 

@@ -78,6 +78,7 @@ export function buildCleanupMetaPatch(type) {
       fullBackupLastReason: "catalog-cleanup",
       fullBackupState: "empty",
       fullBackupIncident: null,
+      fullBackupPendingMessageCount: null,
     };
   }
   if (type === "historical") {
@@ -103,8 +104,10 @@ function getCleanupBlockedReason({ chat, type, summary }) {
   if (type === "pending") {
     return "未保存变更可能包含尚未写入酒馆后端的内容，当前版本禁止直接清理。";
   }
-  if (type === "full" && chat.isFrozen) {
-    return "完整聊天备份正处于冻结保护状态，当前版本禁止直接清理。";
+  if (type === "full" && (chat.isFrozen || chat.isAwaitingConfirmation)) {
+    return chat.isFrozen
+      ? "完整聊天备份正处于冻结保护状态，当前版本禁止直接清理。"
+      : "完整聊天备份正在等待后端确认，完成前不能清理。";
   }
   return "";
 }

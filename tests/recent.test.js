@@ -7,6 +7,7 @@ import {
   refreshRecentBackup,
   shouldPreserveRecentSnapshot,
 } from "../src/backup/recent.js";
+import { mergeRecentSnapshotMeta } from "../src/db/index.js";
 
 test("最近备份层数有上下限", () => {
   assert.equal(normalizeRecentLimit("abc"), 20);
@@ -71,4 +72,24 @@ test("明确删除或完成恢复时允许 recent 更新", () => {
     currentChat,
     reason: "restore",
   }), false);
+});
+
+test("最近备份元数据更新不会覆盖完整备份和后端核对状态", () => {
+  const merged = mergeRecentSnapshotMeta({
+    chatKey: "chat-a",
+    fullBackupAt: "2026-07-12T00:00:00.000Z",
+    fullBackupState: "awaiting-confirmation",
+    fullBackupIncident: { kind: "unexpected-message-change" },
+    lastBackendStatus: "checking",
+  }, {
+    chatKey: "chat-a",
+    lastBackupAt: "2026-07-13T00:00:00.000Z",
+    recentCount: 10,
+  });
+
+  assert.equal(merged.fullBackupAt, "2026-07-12T00:00:00.000Z");
+  assert.equal(merged.fullBackupState, "awaiting-confirmation");
+  assert.equal(merged.fullBackupIncident.kind, "unexpected-message-change");
+  assert.equal(merged.lastBackendStatus, "checking");
+  assert.equal(merged.recentCount, 10);
 });

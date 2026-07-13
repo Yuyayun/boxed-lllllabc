@@ -224,6 +224,7 @@ function renderCatalogEntry(chat) {
   entry.className = "boxed-lllllabc-catalog-entry";
   if (chat.pending.count) entry.dataset.pending = "true";
   if (chat.isFrozen) entry.dataset.frozen = "true";
+  if (chat.isAwaitingConfirmation) entry.dataset.pending = "true";
 
   const header = document.createElement("header");
   header.className = "boxed-lllllabc-catalog-entry-header";
@@ -252,10 +253,11 @@ function renderCatalogEntry(chat) {
   );
   entry.append(header, inventory);
 
-  if (chat.isFrozen || chat.pending.count) {
+  if (chat.isFrozen || chat.isAwaitingConfirmation || chat.pending.count) {
     const flags = document.createElement("div");
     flags.className = "boxed-lllllabc-catalog-flags";
     if (chat.isFrozen) flags.append(renderFlag("完整备份已冻结保护", "danger"));
+    if (chat.isAwaitingConfirmation) flags.append(renderFlag("完整备份等待后端确认", "warning"));
     if (chat.pending.count) flags.append(renderFlag(`${chat.pending.count} 条等待后端确认`, "warning"));
     entry.append(flags);
   }

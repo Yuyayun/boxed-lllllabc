@@ -1,4 +1,10 @@
-import { createFullBackupDecision, createFullBackupMeta, shouldPrioritizeFullBackupWarning } from "../backup/full.js";
+import {
+  createFullBackupAwaitingMeta,
+  createFullBackupDecision,
+  createFullBackupMeta,
+  shouldPrioritizeFullBackupWarning,
+} from "../backup/full.js";
+import { hashCanonicalChat } from "../backup/canonicalize.js";
 import { createHistoricalRecord } from "../backup/historical.js";
 import { createPendingRecords, summarizePendingChanges } from "../backup/pending.js";
 import { createBackupStatus, refreshRecentBackup } from "../backup/recent.js";
@@ -25,7 +31,9 @@ export function createBackupCoordinator({
   refreshVisiblePanel,
   clearScheduledVerification,
   verifyBackendNow,
+  verifyBackendSnapshotNow,
   scheduleBackendVerification,
+  scheduleBackendSnapshotVerification,
   verificationRetryLimit,
 }) {
   async function runBackupNow(trigger = {}) {
@@ -123,13 +131,20 @@ export function createBackupCoordinator({
     const pending = await readCurrentPending(current.identity.chatKey);
     const requestedStatus = fullStatus?.code === "full-frozen"
       ? fullStatus
+      : fullStatus?.code === "full-awaiting-confirmation"
+        ? createDisplayStatus("checking", "保存中", "正在确认其他扩展写入的聊天数据。", pending)
       : pending.length
         ? createDisplayStatus("checking", "保存中", "", pending)
         : createDisplayStatus("saved", "后端已保存");
     const status = await prioritizeFullBackupStatus(current.identity.chatKey, requestedStatus);
 
     setStatus(status);
-    await updateBackendMeta(current.identity.chatKey, pending.length ? "checking" : "saved", pending);
+    const needsFullConfirmation = fullStatus?.code === "full-awaiting-confirmation";
+    await updateBackendMeta(
+      current.identity.chatKey,
+      pending.length || needsFullConfirmation ? "checking" : "saved",
+      pending,
+    );
 
     if (pending.length) {
       if (verifyNow) {
@@ -140,13 +155,29 @@ export function createBackupCoordinator({
       } else {
         scheduleBackendVerification(current.identity.chatKey, settings.backendVerifyDelayMs, 0);
       }
+    } else if (needsFullConfirmation) {
+      const expectedChatHash = hashCanonicalChat(current.chat);
+      if (verifyNow) {
+        await verifyBackendSnapshotNow({
+          chatKey: current.identity.chatKey,
+          expectedChatHash,
+          retryIndex: verificationRetryLimit,
+        });
+      } else {
+        scheduleBackendSnapshotVerification(
+          current.identity.chatKey,
+          expectedChatHash,
+          settings.backendVerifyDelayMs,
+          0,
+        );
+      }
     }
 
     await refreshVisiblePanel();
     return getLatestStatus();
   }
 
-  async function refreshFullBackup({ current, settings, triggers, reason }) {
+  async function refreshFullBackup({ current, settings, triggers, reason, backendConfirmed = false }) {
     if (!settings.enabled || !settings.fullBackupEnabled) {
       return null;
     }
@@ -163,6 +194,9 @@ export function createBackupCoordinator({
           currentChat: current.chat,
           triggers,
           frozen: meta?.fullBackupState === "frozen",
+          frozenIncident: meta?.fullBackupIncident,
+          awaitingConfirmation: meta?.fullBackupState === "awaiting-confirmation",
+          backendConfirmed,
         });
 
         if (decision.action === "skip-frozen") {
@@ -173,6 +207,25 @@ export function createBackupCoordinator({
 
         if (decision.action === "skip" || decision.action === "noop") {
           return null;
+        }
+
+        if (decision.action === "await-confirmation") {
+          const incident = {
+            ...decision.incident,
+            notifiedAt: meta?.fullBackupIncident?.notifiedAt ?? new Date().toISOString(),
+          };
+          await updateChatMetaSummary(db, current.identity.chatKey, createFullBackupAwaitingMeta({
+            identity: current.identity,
+            currentMessages: decision.currentMessages,
+            previousMeta: meta,
+            reason,
+            incident,
+          }));
+          return createBackupStatus(
+            "full-awaiting-confirmation",
+            "完整备份等待后端确认",
+            "检测到其他扩展更新了已有楼层，确认后会安全接续。",
+          );
         }
 
         if (decision.action === "freeze") {
@@ -198,7 +251,7 @@ export function createBackupCoordinator({
           previousMeta: meta,
           reason,
         });
-        if (decision.action === "create" || decision.action === "rebuild" || decision.action === "unfreeze") {
+        if (["create", "rebuild", "unfreeze", "reconcile"].includes(decision.action)) {
           await replaceFullSnapshot(db, {
             chatKey: current.identity.chatKey,
             messages: decision.currentMessages,
@@ -219,6 +272,16 @@ export function createBackupCoordinator({
       console.error("[boxed-lllllabc] 完整聊天备份失败", error);
       return createBackupStatus("db-error", "本地备份不可用", error);
     }
+  }
+
+  async function confirmFullBackupAfterBackendVerification({ current }) {
+    return refreshFullBackup({
+      current,
+      settings: getSettings(),
+      triggers: [{ eventName: "backend-confirmed", args: [] }],
+      reason: "backend-confirmed",
+      backendConfirmed: true,
+    });
   }
 
   async function reconcileCurrentIdentity(identity) {
@@ -306,6 +369,27 @@ export function createBackupCoordinator({
     }
   }
 
+  async function needsFullBackupConfirmation(chatKey) {
+    const settings = getSettings();
+    if (!settings.enabled || !settings.fullBackupEnabled) {
+      return false;
+    }
+    try {
+      const db = await openBackupDatabase();
+      try {
+        const meta = await getChatMeta(db, chatKey);
+        return meta?.fullBackupState === "awaiting-confirmation"
+          || (meta?.fullBackupState === "frozen"
+            && meta?.fullBackupIncident?.kind === "unexpected-message-change");
+      } finally {
+        db.close();
+      }
+    } catch (error) {
+      console.warn("[boxed-lllllabc] 读取完整备份确认状态失败", error);
+      return false;
+    }
+  }
+
   async function readCurrentPending(chatKey) {
     const db = await openBackupDatabase();
     try {
@@ -341,7 +425,9 @@ export function createBackupCoordinator({
   }
 
   return {
+    confirmFullBackupAfterBackendVerification,
     createDisplayStatus,
+    needsFullBackupConfirmation,
     prioritizeFullBackupStatus,
     readCurrentPending,
     refreshFullBackup,
