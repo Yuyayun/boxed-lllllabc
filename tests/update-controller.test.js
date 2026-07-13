@@ -90,3 +90,55 @@ test("确认更新时只调用酒馆原生更新接口", async () => {
   assert.equal(request.url, "/api/extensions/update");
   assert.deepEqual(JSON.parse(request.options.body), { extensionName: "boxed-lllllabc", global: false });
 });
+
+test("用户确认更新成功后安排自动刷新", async () => {
+  const states = [];
+  const notifications = [];
+  let reloads = 0;
+  const controller = createUpdateController({
+    extensionName: "boxed-lllllabc",
+    getRequestHeaders: () => ({}),
+    renderUpdateState: (state) => states.push(state),
+    confirmUpdate: async () => true,
+    sessionStore: null,
+    notify: (...args) => notifications.push(args),
+    scheduleReload: () => {
+      reloads += 1;
+      return true;
+    },
+    fetchImpl: async (url) => url.endsWith("/version")
+      ? response({ json: { isUpToDate: false } })
+      : response({ json: { shortCommitHash: "def5678" } }),
+  });
+
+  await controller.checkOnce();
+  const result = await controller.requestUpdate();
+
+  assert.equal(result.ok, true);
+  assert.equal(result.reloadScheduled, true);
+  assert.equal(reloads, 1);
+  assert.deepEqual(states, ["available", "updating", "updated"]);
+  assert.match(notifications[0][1], /即将自动刷新/);
+});
+
+test("用户取消更新时不刷新页面", async () => {
+  let reloads = 0;
+  const controller = createUpdateController({
+    extensionName: "boxed-lllllabc",
+    getRequestHeaders: () => ({}),
+    renderUpdateState: () => {},
+    confirmUpdate: async () => false,
+    sessionStore: null,
+    scheduleReload: () => {
+      reloads += 1;
+      return true;
+    },
+    fetchImpl: async () => response({ json: { isUpToDate: false } }),
+  });
+
+  await controller.checkOnce();
+  const result = await controller.requestUpdate();
+
+  assert.equal(result.cancelled, true);
+  assert.equal(reloads, 0);
+});

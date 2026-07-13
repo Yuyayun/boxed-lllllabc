@@ -61,13 +61,24 @@ export function openBackupCatalogDialog({ onRefresh, onOpenCleanup } = {}) {
   const body = document.createElement("div");
   body.className = "boxed-lllllabc-catalog-body";
   body.setAttribute("aria-live", "polite");
-  frame.append(header, body);
+
+  const mobileFooter = document.createElement("footer");
+  mobileFooter.className = "boxed-lllllabc-catalog-mobile-footer";
+  const mobileClose = createTextButton("fa-xmark", "关闭", closeBackupCatalogDialog);
+  mobileClose.classList.add("boxed-lllllabc-catalog-mobile-close");
+  mobileFooter.append(mobileClose);
+
+  frame.append(header, body, mobileFooter);
   dialog.append(backdrop, frame);
   dialog.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeBackupCatalogDialog();
   });
   document.body.append(dialog);
-  close.focus();
+  try {
+    close.focus({ preventScroll: true });
+  } catch {
+    close.focus();
+  }
   renderBackupCatalogDialog({ loading: true });
   return dialog;
 }

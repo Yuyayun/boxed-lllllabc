@@ -12,6 +12,7 @@ import { createUpdateController } from "./src/controllers/update-controller.js";
 import { createContextReader } from "./src/context.js";
 import { registerBackupEvents } from "./src/events.js";
 import { registerPageLifecycle } from "./src/lifecycle.js";
+import { createPageReloadScheduler } from "./src/reload.js";
 import { createBackupStatus } from "./src/backup/recent.js";
 import { createSettingsAccessor } from "./src/settings.js";
 import { ensureStatusLine, updateStatusLine } from "./src/ui/status-line.js";
@@ -42,6 +43,12 @@ let storageController = null;
 let updateController = null;
 let updateCheckTimer = null;
 let latestStatus = createBackupStatus("idle", "未初始化");
+const pageReloadScheduler = createPageReloadScheduler({
+  beforeReload: async () => {
+    backendVerifier?.clearScheduledVerification();
+    await backupEvents?.flush?.();
+  },
+});
 
 function setStatus(status) {
   latestStatus = status;
@@ -235,6 +242,7 @@ jQuery(async () => {
     getRequestHeaders,
     renderUpdateState,
     confirmUpdate: confirmExtensionUpdate,
+    scheduleReload: () => pageReloadScheduler.schedule("extension-update"),
   });
   bindUpdateAction(() => updateController.requestUpdate());
   updateCheckTimer = setTimeout(() => updateController.checkOnce(), 3000);
@@ -270,7 +278,16 @@ jQuery(async () => {
 
 export function disable() {
   if (updateCheckTimer) clearTimeout(updateCheckTimer);
+  pageReloadScheduler.cancel();
   pageLifecycle?.unregister();
   backupEvents?.unregister();
   backendVerifier?.clearScheduledVerification();
+}
+
+export function onExtensionInstall() {
+  pageReloadScheduler.schedule("extension-install");
+}
+
+export function onExtensionUpdate() {
+  pageReloadScheduler.schedule("extension-update-hook");
 }

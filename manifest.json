@@ -6,6 +6,10 @@
   "js": "index.js",
   "css": "style.css",
   "author": "辣白菜 / labaicai0969",
-  "version": "0.1.0-rc.1",
-  "homePage": "https://github.com/Yuyayun/boxed-lllllabc"
+  "version": "0.1.0-rc.2",
+  "homePage": "https://github.com/Yuyayun/boxed-lllllabc",
+  "hooks": {
+    "install": "onExtensionInstall",
+    "update": "onExtensionUpdate"
+  }
 }

@@ -14,10 +14,22 @@ test("发布元数据指向真实 GitHub 仓库", async () => {
   const packageJson = JSON.parse(await readProjectFile("package.json"));
 
   assert.equal(manifest.homePage, REPOSITORY_URL);
-  assert.equal(manifest.version, "0.1.0-rc.1");
+  assert.equal(manifest.version, "0.1.0-rc.2");
   assert.equal(packageJson.version, manifest.version);
   assert.equal(packageJson.homepage, REPOSITORY_URL);
   assert.equal(packageJson.repository.url, `git+${REPOSITORY_URL}.git`);
+});
+
+test("发布元数据注册安装与更新后的自动刷新钩子", async () => {
+  const manifest = JSON.parse(await readProjectFile("manifest.json"));
+  const source = await readProjectFile("index.js");
+
+  assert.deepEqual(manifest.hooks, {
+    install: "onExtensionInstall",
+    update: "onExtensionUpdate",
+  });
+  assert.match(source, /export function onExtensionInstall\(\)/);
+  assert.match(source, /export function onExtensionUpdate\(\)/);
 });
 
 test("package.json 使用准确指向 AFPL 9 正文的许可证字段", async () => {
@@ -26,6 +38,9 @@ test("package.json 使用准确指向 AFPL 9 正文的许可证字段", async ()
   assert.equal(packageJson.license, "SEE LICENSE IN LICENSE");
   assert.equal(packageJson.dependencies, undefined);
   assert.equal(packageJson.devDependencies, undefined);
+  assert.ok(packageJson.files.includes("src/"));
+  assert.ok(packageJson.files.includes("manifest.json"));
+  assert.equal(packageJson.files.some((path) => /PROJECT_HANDOFF|superpowers|testing/i.test(path)), false);
 });
 
 test("LICENSE 包含完整 AFPL 9 结构和项目版权信息", async () => {

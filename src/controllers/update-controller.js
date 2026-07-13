@@ -8,6 +8,7 @@ export function createUpdateController({
   fetchImpl = globalThis.fetch?.bind(globalThis),
   sessionStore = globalThis.sessionStorage,
   notify = defaultNotify,
+  scheduleReload = defaultScheduleReload,
 }) {
   let latest = null;
   const sessionKey = `${SESSION_KEY_PREFIX}${extensionName}`;
@@ -49,8 +50,15 @@ export function createUpdateController({
       latest = { ...latest, isUpToDate: true };
       writeSessionResult(sessionStore, sessionKey, latest);
       renderUpdateState("updated");
-      notify("success", "扩展已经更新，刷新酒馆页面后生效。", "箱装辣白菜");
-      return { ok: true, result };
+      const reloadScheduled = tryScheduleReload(scheduleReload);
+      notify(
+        reloadScheduled ? "success" : "warning",
+        reloadScheduled
+          ? "扩展已经更新，酒馆即将自动刷新。"
+          : "扩展已经更新，但无法自动刷新，请手动刷新酒馆页面。",
+        "箱装辣白菜",
+      );
+      return { ok: true, result, reloadScheduled };
     } catch (error) {
       console.error("[boxed-lllllabc] 扩展更新失败", error);
       renderUpdateState("available");
@@ -129,4 +137,21 @@ function writeSessionResult(store, key, result) {
 
 function defaultNotify(type, message, title) {
   globalThis.toastr?.[type]?.(message, title);
+}
+
+function defaultScheduleReload() {
+  if (typeof globalThis.setTimeout !== "function") {
+    return false;
+  }
+  globalThis.setTimeout(() => globalThis.location?.reload?.(), 900);
+  return true;
+}
+
+function tryScheduleReload(scheduleReload) {
+  try {
+    return scheduleReload?.() !== false;
+  } catch (error) {
+    console.warn("[boxed-lllllabc] 安排自动刷新失败", error);
+    return false;
+  }
 }

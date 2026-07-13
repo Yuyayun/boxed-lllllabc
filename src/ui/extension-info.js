@@ -42,7 +42,7 @@ export function renderUpdateState(state) {
     label.textContent = state === "updating"
       ? "正在更新"
       : state === "updated"
-        ? "更新完成，刷新后生效"
+        ? "更新完成，即将刷新"
         : "发现新版本";
   }
 }
@@ -81,7 +81,7 @@ export function confirmExtensionUpdate() {
     const message = document.createElement("p");
     message.textContent = "酒馆已经检测到远程仓库有新版本。更新由 SillyTavern 扩展管理接口执行，不会修改聊天或本地备份。";
     const detail = document.createElement("p");
-    detail.textContent = "更新完成后不会自动刷新页面，你可以先处理当前聊天，再自行刷新使新版本生效。";
+    detail.textContent = "更新完成后酒馆会自动刷新。请先等待当前回复生成结束，并完成手头操作。";
     body.append(message, detail);
 
     const footer = document.createElement("footer");
