@@ -112,3 +112,71 @@ test("切到后台前可以立即冲刷尚在防抖中的事件", async () => {
   assert.deepEqual(received, [["message_updated"]]);
   controller.unregister();
 });
+
+test("CHAT_RENAMED 会先定向迁移再为新身份执行备份", async () => {
+  const handlers = new Map();
+  const calls = [];
+  const controller = registerBackupEvents({
+    eventSource: {
+      on(name, handler) { handlers.set(name, handler); },
+      off(name) { handlers.delete(name); },
+    },
+    eventTypes: {
+      CHAT_CHANGED: "chat_id_changed",
+      CHAT_RENAMED: "chat_renamed",
+    },
+    debounceMs: 1000,
+    async onChatRenamed(trigger) {
+      calls.push(["rename", trigger.args[0].oldFileName, trigger.args[0].newFileName]);
+    },
+    async onBackupNeeded(trigger) {
+      calls.push(["backup", ...trigger.triggers.map((item) => item.eventName)]);
+    },
+  });
+
+  handlers.get("chat_id_changed")("renamed-chat");
+  handlers.get("chat_renamed")({
+    avatarId: "tester.png",
+    oldFileName: "chat-a.jsonl",
+    newFileName: "renamed-chat.jsonl",
+  });
+  await controller.whenIdle();
+
+  assert.deepEqual(calls, [
+    ["rename", "chat-a.jsonl", "renamed-chat.jsonl"],
+    ["backup", "chat_id_changed", "chat_renamed"],
+  ]);
+  controller.unregister();
+});
+
+test("普通聊天切换和创建事件不会触发改名迁移", async () => {
+  const handlers = new Map();
+  const backupBatches = [];
+  let renameCount = 0;
+  const controller = registerBackupEvents({
+    eventSource: {
+      on(name, handler) { handlers.set(name, handler); },
+      off(name) { handlers.delete(name); },
+    },
+    eventTypes: {
+      CHAT_CHANGED: "chat_id_changed",
+      CHAT_CREATED: "chat_created",
+      CHAT_RENAMED: "chat_renamed",
+    },
+    async onChatRenamed() {
+      renameCount += 1;
+    },
+    async onBackupNeeded(trigger) {
+      backupBatches.push(trigger.triggers.map((item) => item.eventName));
+    },
+  });
+
+  handlers.get("chat_id_changed")("chat-b");
+  handlers.get("chat_created")("chat-c");
+  await controller.flush();
+  await controller.whenIdle();
+
+  assert.equal(renameCount, 0);
+  assert.deepEqual(backupBatches, [["chat_id_changed", "chat_created"]]);
+  controller.unregister();
+});

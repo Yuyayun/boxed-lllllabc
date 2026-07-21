@@ -4,6 +4,7 @@ import { buildCleanupMetaPatch, fingerprintBackupRecords } from "../backup/clean
 import {
   mergeIdentityMeta,
   rekeyBackupRecord,
+  selectExplicitRenameSource,
   selectIdentityReconciliationSource,
 } from "./identity-reconciliation.js";
 import { filterValidStoreRecords, inspectBackupCatalogData } from "../storage/health.js";
@@ -196,42 +197,79 @@ export async function reconcileChatIdentity(db, identity) {
       return selection;
     }
 
-    const sourceKey = selection.sourceKey;
-    const configurations = [
-      { type: "recent", store: STORES.recentMessages, index: INDEXES.recentByChat },
-      { type: "pending", store: STORES.pendingChanges, index: INDEXES.pendingByChat },
-      { type: "full", store: STORES.fullMessages, index: INDEXES.fullByChat },
-      { type: "historical", store: STORES.historicalChanges, index: INDEXES.historicalByChat },
-    ];
-    const recordSets = await Promise.all(configurations.map(async (config) => {
-      const store = stores.get(config.store);
-      const index = store.index(config.index);
-      const [sourceRecords, targetRecords] = await Promise.all([
-        requestToPromise(index.getAll(sourceKey)),
-        requestToPromise(index.getAll(targetKey)),
-      ]);
-      return { ...config, store, sourceRecords, targetRecords };
-    }));
-
-    if (recordSets.some(({ targetRecords }) => targetRecords.length > 0)) {
-      return { status: "conflict", sourceKey, targetKey };
-    }
-
-    for (const { type, store, sourceRecords } of recordSets) {
-      for (const record of sourceRecords) {
-        await requestToPromise(store.put(rekeyBackupRecord(record, targetKey, type)));
-        await requestToPromise(store.delete(primaryKeyForRecord(record, type)));
-      }
-    }
-
-    const sourceMeta = metas.find((meta) => meta.chatKey === sourceKey);
-    await requestToPromise(metaStore.put({
-      ...mergeIdentityMeta(sourceMeta, identity.meta),
-      chatKey: targetKey,
-    }));
-    await requestToPromise(metaStore.delete(sourceKey));
-    return { ...selection, targetKey };
+    return migrateIdentityRecords({ stores, metas, identity, selection });
   });
+}
+
+export async function migrateRenamedChatIdentity(db, rename) {
+  if (!rename?.identity?.chatKey || !rename?.identity?.meta || !rename?.source?.chatId) {
+    throw new Error("无法识别聊天改名事件中的旧、新身份。");
+  }
+
+  const storeNames = [
+    STORES.chatMeta,
+    STORES.recentMessages,
+    STORES.pendingChanges,
+    STORES.fullMessages,
+    STORES.historicalChanges,
+  ];
+  return runTransaction(db, storeNames, "readwrite", async (stores) => {
+    const metas = await requestToPromise(stores.get(STORES.chatMeta).getAll());
+    const selection = selectExplicitRenameSource({ rename, metas });
+    if (selection.status !== "migrate") {
+      return selection;
+    }
+    return migrateIdentityRecords({
+      stores,
+      metas,
+      identity: rename.identity,
+      selection,
+    });
+  });
+}
+
+async function migrateIdentityRecords({ stores, metas, identity, selection }) {
+  const metaStore = stores.get(STORES.chatMeta);
+  const sourceKey = selection.sourceKey;
+  const targetKey = identity.chatKey;
+  if (metas.some((meta) => meta.chatKey === targetKey && meta.chatKey !== sourceKey)) {
+    return { status: "conflict", sourceKey, targetKey };
+  }
+
+  const configurations = [
+    { type: "recent", store: STORES.recentMessages, index: INDEXES.recentByChat },
+    { type: "pending", store: STORES.pendingChanges, index: INDEXES.pendingByChat },
+    { type: "full", store: STORES.fullMessages, index: INDEXES.fullByChat },
+    { type: "historical", store: STORES.historicalChanges, index: INDEXES.historicalByChat },
+  ];
+  const recordSets = await Promise.all(configurations.map(async (config) => {
+    const store = stores.get(config.store);
+    const index = store.index(config.index);
+    const [sourceRecords, targetRecords] = await Promise.all([
+      requestToPromise(index.getAll(sourceKey)),
+      requestToPromise(index.getAll(targetKey)),
+    ]);
+    return { ...config, store, sourceRecords, targetRecords };
+  }));
+
+  if (recordSets.some(({ targetRecords }) => targetRecords.length > 0)) {
+    return { status: "conflict", sourceKey, targetKey };
+  }
+
+  for (const { type, store, sourceRecords } of recordSets) {
+    for (const record of sourceRecords) {
+      await requestToPromise(store.put(rekeyBackupRecord(record, targetKey, type)));
+      await requestToPromise(store.delete(primaryKeyForRecord(record, type)));
+    }
+  }
+
+  const sourceMeta = metas.find((meta) => meta.chatKey === sourceKey);
+  await requestToPromise(metaStore.put({
+    ...mergeIdentityMeta(sourceMeta, identity.meta),
+    chatKey: targetKey,
+  }));
+  await requestToPromise(metaStore.delete(sourceKey));
+  return { ...selection, targetKey };
 }
 
 export async function deleteBackupTypeForChat(db, {

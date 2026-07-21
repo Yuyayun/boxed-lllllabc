@@ -260,6 +260,9 @@ jQuery(async () => {
   backupEvents = registerBackupEvents({
     eventSource,
     eventTypes: event_types,
+    onChatRenamed: async (trigger) => {
+      await backupCoordinator.handleChatRenamed(trigger.args);
+    },
     onBackupNeeded: async (trigger) => {
       await runBackupNow(trigger);
       await panelController.refreshVisiblePanel();

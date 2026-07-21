@@ -18,9 +18,11 @@ import {
   putHistoricalChanges,
   putPendingChanges,
   reconcileChatIdentity,
+  migrateRenamedChatIdentity,
   replaceFullSnapshot,
   updateChatMetaSummary,
 } from "../db/index.js";
+import { buildChatRenameIdentity, resolveChatRenameTarget } from "../identity.js";
 import { formatStatusText } from "../ui/presentation.js";
 
 export function createBackupCoordinator({
@@ -309,6 +311,34 @@ export function createBackupCoordinator({
     }
   }
 
+  async function handleChatRenamed(eventArgs) {
+    const eventRename = buildChatRenameIdentity(eventArgs);
+    if (!eventRename.ok) {
+      console.warn(`[boxed-lllllabc] 已忽略无法确认身份的聊天改名事件：${eventRename.reason}`);
+      return { status: "invalid", reason: eventRename.reason };
+    }
+    const current = contextReader.readCurrentChat();
+    const rename = resolveChatRenameTarget(eventRename, current.ok ? current.identity : null);
+
+    try {
+      const db = await openBackupDatabase();
+      try {
+        const result = await migrateRenamedChatIdentity(db, rename);
+        if (result.status === "conflict") {
+          console.warn("[boxed-lllllabc] 聊天改名目标已有独立备份，已保留两边记录且没有覆盖。");
+        } else if (result.status === "ambiguous") {
+          console.warn("[boxed-lllllabc] 聊天改名对应多个旧备份，已停止迁移以避免串档。");
+        }
+        return result;
+      } finally {
+        db.close();
+      }
+    } catch (error) {
+      console.error("[boxed-lllllabc] 聊天改名备份迁移失败", error);
+      return { status: "error", error };
+    }
+  }
+
   async function refreshHistoricalBackup({ current, settings, triggers }) {
     if (!settings.enabled || !settings.historicalBackupEnabled) {
       return;
@@ -427,6 +457,7 @@ export function createBackupCoordinator({
   return {
     confirmFullBackupAfterBackendVerification,
     createDisplayStatus,
+    handleChatRenamed,
     needsFullBackupConfirmation,
     prioritizeFullBackupStatus,
     readCurrentPending,

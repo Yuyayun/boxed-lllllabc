@@ -54,7 +54,7 @@ export function buildChatIdentity(context) {
     ? firstValue(groupId, groupName)
     : firstValue(characterAvatar, characterId, characterName);
   const ownerPrefix = chatType === "group" ? "group" : chatType === "character" ? "character" : "unknown";
-  const chatMarker = firstValue(chatFile, chatId);
+  const chatMarker = firstValue(chatId, chatFile);
 
   if (chatType !== "unknown" && hasValue(ownerId) && hasValue(chatMarker)) {
     meta.chatKey = [
@@ -100,6 +100,86 @@ export function buildChatIdentity(context) {
     ok: false,
     reason: "当前聊天身份信息不足。",
     meta,
+  };
+}
+
+export function buildChatRenameIdentity(eventArgs) {
+  const payload = Array.isArray(eventArgs)
+    ? eventArgs.length === 1 ? eventArgs[0] : null
+    : eventArgs;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { ok: false, reason: "聊天改名事件参数格式不受支持。" };
+  }
+
+  const groupId = firstValue(payload.groupId);
+  const characterAvatar = firstValue(payload.avatarId);
+  const oldChatId = normalizeChatFileMarker(payload.oldFileName);
+  const newChatId = normalizeChatFileMarker(payload.newFileName);
+  const chatType = hasValue(groupId)
+    ? "group"
+    : hasValue(characterAvatar)
+      ? "character"
+      : "unknown";
+  const ownerId = chatType === "group" ? groupId : characterAvatar;
+  if (chatType === "unknown" || !hasValue(ownerId) || !oldChatId || !newChatId || oldChatId === newChatId) {
+    return { ok: false, reason: "聊天改名事件缺少明确的旧名称、新名称或所属对象。" };
+  }
+
+  const ownerPrefix = chatType === "group" ? "group" : "character";
+  const normalizedOwner = normalizePart(ownerId);
+  const sourceKey = [ownerPrefix, normalizedOwner, oldChatId].join(":");
+  const targetKey = [ownerPrefix, normalizedOwner, newChatId].join(":");
+  const meta = {
+    chatKey: targetKey,
+    identityVersion: 2,
+    chatType,
+    characterId: "",
+    characterName: "",
+    characterAvatar: chatType === "character" ? normalizedOwner : "",
+    groupId: chatType === "group" ? normalizedOwner : "",
+    groupName: "",
+    chatId: newChatId,
+    chatFile: newChatId,
+    chatIntegrity: "",
+  };
+
+  return {
+    ok: true,
+    source: {
+      chatType,
+      ownerId: normalizedOwner,
+      chatId: oldChatId,
+      sourceKey,
+    },
+    identity: {
+      ok: true,
+      chatKey: targetKey,
+      meta,
+      legacyChatKeys: [],
+    },
+  };
+}
+
+export function resolveChatRenameTarget(rename, currentIdentity) {
+  if (!rename?.ok || !currentIdentity?.ok || !currentIdentity?.chatKey || !currentIdentity?.meta) {
+    return rename;
+  }
+
+  const currentMeta = currentIdentity.meta;
+  if (currentMeta.chatType !== rename.source.chatType) {
+    return rename;
+  }
+  const currentOwner = currentMeta.chatType === "group"
+    ? normalizePart(currentMeta.groupId)
+    : normalizePart(currentMeta.characterAvatar);
+  const currentChatId = normalizeChatFileMarker(firstValue(currentMeta.chatId, currentMeta.chatFile));
+  if (currentOwner !== rename.source.ownerId || !currentChatId || currentChatId === rename.source.chatId) {
+    return rename;
+  }
+
+  return {
+    ...rename,
+    identity: currentIdentity,
   };
 }
 
@@ -158,6 +238,13 @@ export function normalizePart(value) {
     .trim()
     .replace(/\s+/g, " ")
     .replace(/[:|]/g, "_");
+}
+
+function normalizeChatFileMarker(value) {
+  if (!hasValue(value)) {
+    return "";
+  }
+  return normalizePart(String(value).replace(/\.jsonl$/i, ""));
 }
 
 function findCharacter(context, characterId) {

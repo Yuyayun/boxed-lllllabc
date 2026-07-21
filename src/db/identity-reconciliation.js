@@ -15,30 +15,47 @@ export function selectIdentityReconciliationSource({ identity, metas = [] } = {}
     && sameOwner(meta, identity.meta)
   ));
   const legacyKeys = new Set(Array.isArray(identity.legacyChatKeys) ? identity.legacyChatKeys : []);
-  const locationMatches = candidates.filter((meta) => (
-    legacyKeys.has(meta.chatKey) || sameChatLocation(meta, identity.meta)
-  ));
-  if (locationMatches.length === 1) {
-    return { status: "migrate", sourceKey: locationMatches[0].chatKey, reason: "location" };
+  const legacyMatches = candidates.filter((meta) => legacyKeys.has(meta.chatKey));
+  if (legacyMatches.length === 1) {
+    return { status: "migrate", sourceKey: legacyMatches[0].chatKey, reason: "legacy-key" };
   }
-  if (locationMatches.length > 1) {
-    return { status: "ambiguous", reason: "location" };
-  }
-
-  const integrity = String(identity.meta?.chatIntegrity ?? "");
-  if (!integrity) {
-    return { status: "new" };
-  }
-
-  const integrityMatches = candidates.filter((meta) => String(meta.chatIntegrity ?? "") === integrity);
-  if (integrityMatches.length === 1) {
-    return { status: "migrate", sourceKey: integrityMatches[0].chatKey, reason: "integrity" };
-  }
-  if (integrityMatches.length > 1) {
-    return { status: "ambiguous", reason: "integrity" };
+  if (legacyMatches.length > 1) {
+    return { status: "ambiguous", reason: "legacy-key" };
   }
 
   return { status: "new" };
+}
+
+export function selectExplicitRenameSource({ rename, metas = [] } = {}) {
+  const identity = rename?.identity;
+  const targetKey = String(identity?.chatKey ?? "");
+  const sourceChatId = normalizeChatMarker(rename?.source?.chatId);
+  if (!targetKey || !sourceChatId || !identity?.meta) {
+    return { status: "invalid" };
+  }
+
+  const safeMetas = Array.isArray(metas) ? metas.filter((meta) => meta?.chatKey) : [];
+  const targetExists = safeMetas.some((meta) => meta.chatKey === targetKey);
+  const sourceMatches = safeMetas.filter((meta) => (
+    meta.chatKey !== targetKey
+    && sameChatType(meta, identity.meta)
+    && sameOwner(meta, identity.meta)
+    && normalizeChatMarker(firstNonEmpty(meta?.chatId, meta?.chatFile)) === sourceChatId
+  ));
+
+  if (targetExists && sourceMatches.length) {
+    return { status: "conflict", sourceKey: sourceMatches[0].chatKey, targetKey };
+  }
+  if (targetExists) {
+    return { status: "current", sourceKey: targetKey };
+  }
+  if (sourceMatches.length === 1) {
+    return { status: "migrate", sourceKey: sourceMatches[0].chatKey, reason: "explicit-rename" };
+  }
+  if (sourceMatches.length > 1) {
+    return { status: "ambiguous", reason: "explicit-rename" };
+  }
+  return { status: "source-missing", reason: "explicit-rename" };
 }
 
 export function mergeIdentityMeta(previous, identityMeta) {
@@ -76,12 +93,6 @@ function sameOwner(left, right) {
   return sameNonEmptyValue(left?.characterAvatar, right?.characterAvatar);
 }
 
-function sameChatLocation(left, right) {
-  const leftMarker = firstNonEmpty(left?.chatFile, left?.chatId);
-  const rightMarker = firstNonEmpty(right?.chatFile, right?.chatId);
-  return sameNonEmptyValue(leftMarker, rightMarker);
-}
-
 function sameNonEmptyValue(left, right) {
   const normalizedLeft = String(left ?? "");
   const normalizedRight = String(right ?? "");
@@ -90,4 +101,12 @@ function sameNonEmptyValue(left, right) {
 
 function firstNonEmpty(...values) {
   return values.find((value) => String(value ?? "") !== "") ?? "";
+}
+
+function normalizeChatMarker(value) {
+  return String(value ?? "")
+    .trim()
+    .replace(/\.jsonl$/i, "")
+    .replace(/\s+/g, " ")
+    .replace(/[:|]/g, "_");
 }

@@ -4,9 +4,11 @@ export function registerBackupEvents({
   eventSource,
   eventTypes,
   onBackupNeeded,
+  onChatRenamed,
   debounceMs = DEFAULT_DEBOUNCE_MS,
 }) {
   const eventNames = pickEventNames(eventTypes);
+  const renameEventName = eventTypes?.CHAT_RENAMED;
   let timer = null;
   let queuedTriggers = [];
   let queuedRun = Promise.resolve();
@@ -52,12 +54,43 @@ export function registerBackupEvents({
     return queuedRun;
   };
 
+  const enqueueRename = (trigger) => {
+    if (stopped) {
+      return queuedRun;
+    }
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    // CHAT_RENAMED is emitted after SillyTavern reloads the renamed chat. Keep
+    // preceding events, but process them only after the explicit old-to-new
+    // migration so they cannot create the target key first.
+    const precedingTriggers = queuedTriggers;
+    queuedTriggers = [];
+    queuedRun = queuedRun
+      .then(async () => {
+        await onChatRenamed?.(trigger);
+        await onBackupNeeded({
+          eventName: "batched",
+          args: [],
+          triggers: [...precedingTriggers, trigger],
+        });
+      })
+      .catch((error) => {
+        console.error("[boxed-lllllabc] 聊天改名事件处理失败", error);
+      });
+    return queuedRun;
+  };
+
   for (const eventName of eventNames) {
     if (typeof eventSource?.on === "function") {
-      const handler = (...args) => schedule({
-        eventName,
-        args,
-      });
+      const handler = (...args) => {
+        const trigger = { eventName, args };
+        if (renameEventName && eventName === renameEventName) {
+          return enqueueRename(trigger);
+        }
+        return schedule(trigger);
+      };
       handlers.set(eventName, handler);
       eventSource.on(eventName, handler);
     }
@@ -104,6 +137,7 @@ export function pickEventNames(eventTypes = {}) {
     eventTypes.GENERATION_ENDED,
     eventTypes.GENERATION_STOPPED,
     eventTypes.CHAT_CREATED,
+    eventTypes.CHAT_RENAMED,
     eventTypes.CHAT_DELETED,
     eventTypes.GROUP_UPDATED,
   ].filter(Boolean);
