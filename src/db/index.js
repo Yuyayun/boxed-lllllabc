@@ -2,6 +2,10 @@ import { migrateDatabase } from "./migration.js";
 import { DB_NAME, DB_VERSION, INDEXES, STORES } from "./schema.js";
 import { buildCleanupMetaPatch, fingerprintBackupRecords } from "../backup/cleanup.js";
 import {
+  buildResolvedFullBackupMeta,
+  FROZEN_FULL_BACKUP_ACTIONS,
+} from "../backup/frozen-resolution.js";
+import {
   mergeIdentityMeta,
   rekeyBackupRecord,
   selectExplicitRenameSource,
@@ -314,6 +318,77 @@ export async function deleteBackupTypeForChat(db, {
       }));
     }
     return { deletedCount: keys.length, type, chatKey };
+  });
+}
+
+export async function resolveFrozenFullBackup(db, {
+  chatKey,
+  action,
+  expectedFullFingerprint,
+  expectedIncidentFingerprint,
+  messages = [],
+  identityMeta = {},
+  now = new Date().toISOString(),
+} = {}) {
+  if (!chatKey || !Object.values(FROZEN_FULL_BACKUP_ACTIONS).includes(action)) {
+    throw new Error("无法识别要处理的冻结完整备份。");
+  }
+  if (!expectedFullFingerprint || !expectedIncidentFingerprint) {
+    throw new Error("缺少冻结备份确认信息，请重新打开后再处理。");
+  }
+
+  const safeMessages = Array.isArray(messages) ? messages : [];
+  if (action === FROZEN_FULL_BACKUP_ACTIONS.adoptCurrent) {
+    const hasInvalidIndex = safeMessages.some((message, index) => message?.messageIndex !== index);
+    if (hasInvalidIndex) {
+      throw new Error("当前聊天楼层不连续，不能采用为新的完整备份。");
+    }
+  }
+
+  return runTransaction(db, [STORES.chatMeta, STORES.fullMessages], "readwrite", async (stores) => {
+    const metaStore = stores.get(STORES.chatMeta);
+    const fullStore = stores.get(STORES.fullMessages);
+    const fullIndex = fullStore.index(INDEXES.fullByChat);
+    const [currentMeta, currentRecords] = await Promise.all([
+      requestToPromise(metaStore.get(chatKey)),
+      requestToPromise(fullIndex.getAll(chatKey)),
+    ]);
+
+    if (currentMeta?.fullBackupState !== "frozen") {
+      throw new Error("完整聊天备份状态已经变化，请刷新后重新检查。");
+    }
+    if (fingerprintBackupRecords(currentRecords) !== expectedFullFingerprint) {
+      throw new Error("冻结的完整备份在确认期间发生了变化，请重新检查。");
+    }
+    if (fingerprintBackupRecords([currentMeta.fullBackupIncident ?? null]) !== expectedIncidentFingerprint) {
+      throw new Error("冻结原因在确认期间发生了变化，请重新检查。");
+    }
+
+    const keys = await requestToPromise(fullIndex.getAllKeys(chatKey));
+    for (const key of keys) {
+      await requestToPromise(fullStore.delete(key));
+    }
+
+    if (action === FROZEN_FULL_BACKUP_ACTIONS.adoptCurrent) {
+      for (const message of safeMessages) {
+        await requestToPromise(fullStore.put({ ...message, chatKey }));
+      }
+    }
+
+    const nextMeta = buildResolvedFullBackupMeta({
+      action,
+      currentMeta,
+      identityMeta: { ...identityMeta, chatKey },
+      messages: safeMessages,
+      now,
+    });
+    await requestToPromise(metaStore.put(nextMeta));
+    return {
+      action,
+      chatKey,
+      deletedCount: keys.length,
+      savedCount: action === FROZEN_FULL_BACKUP_ACTIONS.adoptCurrent ? safeMessages.length : 0,
+    };
   });
 }
 

@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>冻结完整备份真实事务验收</title>
+    <link rel="stylesheet" href="../../style.css">
+    <style>
+      :root {
+        color-scheme: light;
+        --SmartThemeBodyColor: #f5f2ef;
+        --SmartThemeChatTintColor: #fffaf6;
+        --SmartThemeBorderColor: #b8aaa2;
+        --SmartThemeQuoteColor: #7e4c4c;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #eee9e5;
+        color: #2e2927;
+        font: 16px/1.5 system-ui, sans-serif;
+      }
+
+      .menu_button,
+      .test-button {
+        padding: 7px 11px;
+        border: 1px solid #b8aaa2;
+        border-radius: 5px;
+        background: #f8f5f2;
+        color: inherit;
+      }
+
+      .test-shell {
+        display: grid;
+        gap: 12px;
+        width: min(760px, calc(100% - 24px));
+        margin: 12px auto;
+      }
+
+      .test-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 10px;
+        border: 1px solid #b8aaa2;
+        border-radius: 8px;
+        background: #fffaf6;
+      }
+
+      #test-audit {
+        flex-basis: 100%;
+        margin: 0;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="test-shell">
+      <section class="test-controls" aria-label="专用测试控制">
+        <button id="seed-test-data" class="test-button" type="button">建立冻结测试数据</button>
+        <button id="cleanup-test-data" class="test-button" type="button">清理专用测试数据库</button>
+        <p id="test-audit" role="status" aria-live="polite">尚未建立测试数据</p>
+      </section>
+      <section id="boxed-lllllabc-settings-panel" class="boxed-lllllabc-panel">
+        <div id="boxed-lllllabc-settings-panel-body" class="boxed-lllllabc-panel-body"></div>
+      </section>
+    </main>
+    <script type="module">
+      import { canonicalizeMessage } from "../../src/backup/canonicalize.js";
+      import { createBackupStatus } from "../../src/backup/recent.js";
+      import { createPanelController } from "../../src/controllers/panel-controller.js";
+      import {
+        getChatMeta,
+        getFullMessages,
+        openBackupDatabase,
+        replaceFullSnapshot,
+      } from "../../src/db/index.js";
+
+      const chatKey = "character:boxed-test.png:frozen-resolution-e2e";
+      const current = {
+        ok: true,
+        chat: [
+          { mes: "专用测试第 0 层", swipes: ["专用测试第 0 层"], swipe_id: 0 },
+          { mes: "专用测试第 1 层", swipes: ["专用测试第 1 层"], swipe_id: 0 },
+        ],
+        identity: {
+          chatKey,
+          meta: {
+            chatKey,
+            chatType: "character",
+            chatId: "冻结处理专用测试聊天",
+            chatDisplayName: "冻结处理专用测试聊天",
+            characterName: "箱装辣白菜测试",
+            characterAvatar: "boxed-test.png",
+          },
+        },
+      };
+      const latestStatus = createBackupStatus("saved", "后端已保存");
+      const controller = createPanelController({
+        getContextReader: () => ({ readCurrentChat: () => current }),
+        getSettings: () => ({
+          enabled: true,
+          recentBackupEnabled: false,
+          fullBackupEnabled: true,
+          historicalBackupEnabled: true,
+        }),
+        getLatestStatus: () => latestStatus,
+        setStatus: () => {},
+        readCurrentPending: async () => [],
+        createDisplayStatus: (code, shortText) => createBackupStatus(code, shortText),
+        createRestoreUiState: () => ({}),
+        verifyBackendNow: async () => {},
+        verifyBackendSnapshotNow: async () => {},
+        verificationRetryLimit: 3,
+        getStorageSnapshot: () => ({}),
+        onBackupsChanged: () => updateAudit("处理完成"),
+      });
+
+      document.querySelector("#seed-test-data").addEventListener("click", seedFrozenData);
+      document.querySelector("#cleanup-test-data").addEventListener("click", cleanupTestDatabase);
+
+      async function seedFrozenData() {
+        const now = new Date().toISOString();
+        const messages = [
+          ...current.chat,
+          { mes: "旧备份中多出的第 2 层", swipes: ["旧备份中多出的第 2 层"], swipe_id: 0 },
+        ].map((message, index) => canonicalizeMessage(message, index, now));
+        const db = await openBackupDatabase();
+        try {
+          await replaceFullSnapshot(db, {
+            chatKey,
+            messages,
+            meta: {
+              ...current.identity.meta,
+              fullBackupAt: now,
+              fullBackupMessageCount: messages.length,
+              fullBackupFirstIndex: 0,
+              fullBackupLastIndex: messages.length - 1,
+              fullBackupLastReason: "dedicated-e2e-seed",
+              fullBackupState: "frozen",
+              fullBackupIncident: {
+                kind: "unexpected-shorter-chat",
+                detectedAt: now,
+                backupMessageCount: messages.length,
+                observedMessageCount: current.chat.length,
+              },
+              fullBackupPendingMessageCount: null,
+            },
+          });
+        } finally {
+          db.close();
+        }
+        await controller.renderPanel("settings");
+        await updateAudit("已建立冻结测试数据");
+      }
+
+      async function updateAudit(prefix) {
+        const db = await openBackupDatabase();
+        try {
+          const [meta, messages] = await Promise.all([
+            getChatMeta(db, chatKey),
+            getFullMessages(db, chatKey),
+          ]);
+          document.querySelector("#test-audit").textContent =
+            `${prefix}｜状态：${meta?.fullBackupState ?? "不存在"}｜完整备份：${messages.length} 层`
+            + `｜最近/历史/pending：未写入`;
+        } finally {
+          db.close();
+        }
+      }
+
+      async function cleanupTestDatabase() {
+        await new Promise((resolve, reject) => {
+          const request = indexedDB.deleteDatabase("boxed-lllllabc");
+          request.onsuccess = () => resolve();
+          request.onerror = () => reject(request.error ?? new Error("清理测试数据库失败"));
+          request.onblocked = () => reject(new Error("测试数据库仍被占用"));
+        });
+        document.querySelector("#boxed-lllllabc-settings-panel-body").replaceChildren();
+        document.querySelector("#test-audit").textContent = "专用测试数据库已清理";
+      }
+
+      await seedFrozenData();
+    </script>
+  </body>
+</html>

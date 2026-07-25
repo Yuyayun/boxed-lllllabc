@@ -1,6 +1,11 @@
 import { createBackupStatus } from "../backup/recent.js";
-import { hashCanonicalChat } from "../backup/canonicalize.js";
+import { canonicalizeMessage, hashCanonicalChat } from "../backup/canonicalize.js";
 import { buildBackupCatalog } from "../backup/catalog.js";
+import {
+  createFrozenFullBackupResolutionPlan,
+  FROZEN_FULL_BACKUP_ACTIONS,
+  validateFrozenFullBackupResolution,
+} from "../backup/frozen-resolution.js";
 import {
   getChatMeta,
   getFullMessages,
@@ -8,9 +13,11 @@ import {
   getPendingChanges,
   getRecentMessages,
   openBackupDatabase,
+  resolveFrozenFullBackup,
   updateChatMetaSummary,
 } from "../db/index.js";
 import { renderCurrentChatPanel } from "../ui/current-chat-panel.js";
+import { openFrozenBackupDialog } from "../ui/frozen-backup-dialog.js";
 import { createCurrentChatStorageText } from "../ui/storage-status.js";
 import {
   closeStatusDialog,
@@ -31,6 +38,9 @@ export function createPanelController({
   verificationRetryLimit,
   openBackupCleanup,
   getStorageSnapshot = () => ({}),
+  openFrozenDialog = openFrozenBackupDialog,
+  resolveFrozenBackup = resolveFrozenFullBackup,
+  onBackupsChanged = async () => {},
 }) {
   function getPanelElements(target = "settings") {
     if (target === "status" || target === "dialog") {
@@ -166,6 +176,11 @@ export function createPanelController({
           fullMessages,
           historicalChanges,
         });
+        const frozenResolution = createFrozenFullBackupResolutionPlan({
+          current,
+          meta: panelMeta,
+          fullMessages,
+        });
         renderCurrentChatPanel(panelBody, {
           status: getLatestStatus(),
           meta: panelMeta,
@@ -175,6 +190,16 @@ export function createPanelController({
           pending,
           settings,
           restore,
+          frozenResolution: frozenResolution.ok
+            ? {
+              plan: frozenResolution.plan,
+              onOpen: () => openFrozenDialog({
+                plan: frozenResolution.plan,
+                fullBackupEnabled: Boolean(settings.enabled && settings.fullBackupEnabled),
+                onConfirm: (action, plan) => executeFrozenResolution(plan, action),
+              }),
+            }
+            : {},
           management: {
             disabledReason: cleanupChat ? "" : "当前聊天还没有可管理的本地备份。",
             storageText: createCurrentChatStorageText(
@@ -231,6 +256,57 @@ export function createPanelController({
     }
   }
 
+  async function executeFrozenResolution(plan, action) {
+    const contextReader = getContextReader();
+    if (!contextReader) {
+      return { ok: false, reason: "扩展尚未准备好，请关闭后重新打开。" };
+    }
+
+    const current = contextReader.readCurrentChat();
+    let db;
+    try {
+      db = await openBackupDatabase();
+      const [meta, fullMessages] = await Promise.all([
+        getChatMeta(db, plan?.chatKey),
+        getFullMessages(db, plan?.chatKey),
+      ]);
+      const validation = validateFrozenFullBackupResolution({
+        plan,
+        action,
+        current,
+        meta,
+        fullMessages,
+      });
+      if (!validation.ok) {
+        return validation;
+      }
+
+      const now = new Date().toISOString();
+      const messages = action === FROZEN_FULL_BACKUP_ACTIONS.adoptCurrent
+        ? current.chat.map((message, index) => canonicalizeMessage(message, index, now))
+        : [];
+      const result = await resolveFrozenBackup(db, {
+        chatKey: plan.chatKey,
+        action,
+        expectedFullFingerprint: plan.expectedFullFingerprint,
+        expectedIncidentFingerprint: plan.expectedIncidentFingerprint,
+        messages,
+        identityMeta: current.identity.meta,
+        now,
+      });
+      await refreshVisiblePanel();
+      await onBackupsChanged();
+      return { ok: true, reason: "", ...result };
+    } catch (error) {
+      return {
+        ok: false,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    } finally {
+      db?.close?.();
+    }
+  }
+
   async function acknowledgeFullBackupIncident() {
     const contextReader = getContextReader();
     if (!contextReader) {
@@ -275,6 +351,7 @@ export function createPanelController({
   }
 
   return {
+    executeFrozenResolution,
     getPanelElements,
     handleStatusDisplayModeChange,
     openCurrentChatPanel,

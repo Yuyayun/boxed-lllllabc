@@ -40,6 +40,7 @@ test("冻结完整备份和空备份类型明确禁止清理", () => {
 
   assert.equal(fullPlan.canConfirm, false);
   assert.match(fullPlan.blockedReason, /冻结保护/);
+  assert.match(fullPlan.blockedReason, /当前聊天备份.*确认当前内容无误/);
   assert.equal(emptyHistorical.canConfirm, false);
   assert.match(emptyHistorical.blockedReason, /当前没有历史楼层改动备份/);
 });

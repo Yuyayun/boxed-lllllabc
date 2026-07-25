@@ -106,7 +106,7 @@ function getCleanupBlockedReason({ chat, type, summary }) {
   }
   if (type === "full" && (chat.isFrozen || chat.isAwaitingConfirmation)) {
     return chat.isFrozen
-      ? "完整聊天备份正处于冻结保护状态，当前版本禁止直接清理。"
+      ? "完整聊天备份正处于冻结保护状态。请打开对应聊天，在“当前聊天备份”中确认当前内容无误后处理。"
       : "完整聊天备份正在等待后端确认，完成前不能清理。";
   }
   return "";

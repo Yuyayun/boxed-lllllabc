@@ -119,6 +119,7 @@ function initializeControllers() {
     verificationRetryLimit: backendVerifier.retryLimit,
     openBackupCleanup: (chat) => catalogController?.openCleanup(chat),
     getStorageSnapshot: () => storageController?.getSnapshot() ?? {},
+    onBackupsChanged: () => storageController?.refresh(),
   });
 
   catalogController = createCatalogController({

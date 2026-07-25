@@ -15,6 +15,7 @@ export function renderCurrentChatPanel(container, {
   pending = [],
   settings = {},
   restore = {},
+  frozenResolution = {},
   management = {},
   onVerify,
 }) {
@@ -40,7 +41,7 @@ export function renderCurrentChatPanel(container, {
       container.dataset.recentExpanded = String(expanded);
     },
   }, restore));
-  container.append(renderFullSection(fullMessages, meta, settings, restore));
+  container.append(renderFullSection(fullMessages, meta, settings, restore, frozenResolution));
   const historicalSection = renderHistoricalSection(historicalChanges, restore);
   if (historicalSection) {
     container.append(historicalSection);
@@ -50,7 +51,7 @@ export function renderCurrentChatPanel(container, {
 
 }
 
-function renderFullSection(messages, meta = {}, settings = {}, restore = {}) {
+function renderFullSection(messages, meta = {}, settings = {}, restore = {}, frozenResolution = {}) {
   const section = document.createElement("section");
   section.className = "boxed-lllllabc-panel-section";
   const title = document.createElement("div");
@@ -78,6 +79,8 @@ function renderFullSection(messages, meta = {}, settings = {}, restore = {}) {
   preview.textContent = getMessagePreview(messages.at(-1));
   main.append(heading, detail, preview);
   file.append(main);
+  const actions = document.createElement("div");
+  actions.className = "boxed-lllllabc-full-actions";
   if (restore.fullPlan?.totalCount && typeof restore.onPreviewFull === "function") {
     const action = document.createElement("button");
     action.type = "button";
@@ -89,7 +92,25 @@ function renderFullSection(messages, meta = {}, settings = {}, restore = {}) {
     label.textContent = "预览整聊恢复";
     action.append(icon, label);
     action.addEventListener("click", () => restore.onPreviewFull());
-    file.append(action);
+    actions.append(action);
+  }
+  if (meta.fullBackupState === "frozen"
+    && frozenResolution.plan
+    && typeof frozenResolution.onOpen === "function") {
+    const action = document.createElement("button");
+    action.type = "button";
+    action.className = "menu_button boxed-lllllabc-action-button boxed-lllllabc-frozen-resolve";
+    const icon = document.createElement("i");
+    icon.className = "fa-solid fa-shield-halved";
+    icon.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.textContent = "确认当前聊天无误";
+    action.append(icon, label);
+    action.addEventListener("click", () => frozenResolution.onOpen());
+    actions.append(action);
+  }
+  if (actions.childElementCount) {
+    file.append(actions);
   }
   section.append(file);
   return section;
