@@ -1,7 +1,61 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { renderUpdateState } from "../src/ui/extension-info.js";
+import {
+  parseVersionChangelog,
+  renderUpdateState,
+  resolveSiblingAssetUrl,
+} from "../src/ui/extension-info.js";
+
+test("更新日志地址与 manifest 使用同一扩展目录", () => {
+  assert.equal(
+    resolveSiblingAssetUrl("scripts/extensions/third-party/boxed-lllllabc/manifest.json", "CHANGELOG.md"),
+    "scripts/extensions/third-party/boxed-lllllabc/CHANGELOG.md",
+  );
+});
+
+test("只提取当前安装版本的更新日志", () => {
+  const release = parseVersionChangelog(`
+# 更新日志
+
+## 未发布
+
+暂无。
+
+## 0.1.3 — 2026-07-25
+
+本版本增加安全处理入口。
+
+### 功能
+
+- 第一项变化。
+- 第二项变化。
+
+### 验证
+
+- 自动测试通过。
+
+## 0.1.2 — 2026-07-21
+
+旧版本内容。
+`, "0.1.3");
+
+  assert.deepEqual(release, {
+    version: "0.1.3",
+    date: "2026-07-25",
+    blocks: [
+      { type: "paragraph", text: "本版本增加安全处理入口。" },
+      { type: "heading", text: "功能" },
+      { type: "list", items: ["第一项变化。", "第二项变化。"] },
+      { type: "heading", text: "验证" },
+      { type: "list", items: ["自动测试通过。"] },
+    ],
+  });
+});
+
+test("更新日志缺少当前版本时返回空结果", () => {
+  assert.equal(parseVersionChangelog("## 0.1.2\n\n旧版本内容。", "0.1.3"), null);
+});
 
 function createUpdateElements() {
   const label = { textContent: "" };

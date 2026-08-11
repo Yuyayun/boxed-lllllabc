@@ -75,6 +75,17 @@ test("扩展信息弹窗保留用户确认的原有提示", async () => {
   assert.ok(source.includes("本扩展可免费使用，禁止任何形式的商业用途。"));
 });
 
+test("扩展信息弹窗使用纯图标仓库入口并提供更新日志开关", async () => {
+  const source = await readProjectFile("src/ui/extension-info.js");
+
+  assert.doesNotMatch(source, /boxed-lllllabc-info-mark/);
+  assert.doesNotMatch(source, /repositoryState/);
+  assert.match(source, /fa-brands fa-github/);
+  assert.match(source, /fa-file-lines/);
+  assert.match(source, /aria-expanded/);
+  assert.match(source, /CHANGELOG\.md/);
+});
+
 test("设置面板使用轻量版本信息布局并保留独立更新入口", async () => {
   const html = await readProjectFile("settings.html");
   const infoButton = html.match(/<button\s+id="boxed-lllllabc-info-toggle"[\s\S]*?>/)?.[0] ?? "";

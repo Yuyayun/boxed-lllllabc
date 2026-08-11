@@ -13,6 +13,7 @@ let rootObserver = null;
 let observedChat = null;
 let placementFrame = 0;
 let observeRetryTimer = 0;
+let viewportListenerBound = false;
 
 export function ensureStatusLine({ onOpenPanel, getDisplayMode, getMessageCentered } = {}) {
   if (typeof onOpenPanel === "function") {
@@ -33,6 +34,7 @@ export function ensureStatusLine({ onOpenPanel, getDisplayMode, getMessageCenter
   syncStatusLinePlacement();
   observeChatChanges();
   observeRootChanges();
+  observeViewportChanges();
 }
 
 export function updateStatusLine(status) {
@@ -147,7 +149,7 @@ function applyLatestStatus() {
   }
   statusLine.dataset.status = getVisualStatus(latestStatus.code);
   statusLine.setAttribute("aria-label", `${latestStatus.shortText}，查看当前聊天备份`);
-  statusLine.title = "查看当前聊天备份";
+  statusLine.title = `${latestStatus.shortText}；查看当前聊天备份`;
 }
 
 function ensureStatusDialog() {
@@ -166,6 +168,7 @@ function placeAtChatTop(statusLine, panel) {
   delete statusLine.dataset.messageAlign;
   delete statusLine.dataset.host;
   const target = document.querySelector("#chat") ?? document.querySelector("#chat_container");
+  statusLine.dataset.topLayout = readStatusTopLayout(target);
   if (target?.parentElement) {
     const parent = target.parentElement;
     if (statusLine.parentElement !== parent || statusLine.nextElementSibling !== panel || panel.nextElementSibling !== target) {
@@ -186,6 +189,7 @@ function placeInsideLatestMessage(statusLine, panel) {
   if (latestMessage) {
     statusLine.dataset.placement = "message";
     statusLine.dataset.messageAlign = getStatusMessageAlignment(readMessageCentered());
+    delete statusLine.dataset.topLayout;
 
     const directMessageBlock = Array.from(latestMessage.children)
       .find((element) => element.classList.contains("mes_block"));
@@ -201,6 +205,18 @@ function placeInsideLatestMessage(statusLine, panel) {
   }
 
   placeAtChatTop(statusLine, panel);
+}
+
+export function getStatusTopLayout(position) {
+  return position === "absolute" || position === "fixed" ? "overlay" : "flow";
+}
+
+function readStatusTopLayout(target) {
+  if (target?.id !== "chat" || typeof globalThis.getComputedStyle !== "function") {
+    return "flow";
+  }
+
+  return getStatusTopLayout(globalThis.getComputedStyle(target).position);
 }
 
 function observeChatChanges() {
@@ -244,7 +260,8 @@ function getVisualStatus(code) {
 }
 
 function observeRootChanges() {
-  if (rootObserver || !document.body) {
+  const root = document.documentElement ?? document.body;
+  if (rootObserver || !root) {
     return;
   }
 
@@ -252,16 +269,27 @@ function observeRootChanges() {
     const currentChat = document.querySelector("#chat");
     const statusLine = document.getElementById(STATUS_LINE_ID);
     const panel = document.getElementById(STATUS_PANEL_ID);
+    const topLayoutChanged = statusLine?.dataset.placement === "top"
+      && statusLine.dataset.topLayout !== readStatusTopLayout(currentChat);
 
-    if (currentChat !== observedChat || !statusLine || !panel) {
+    if (currentChat !== observedChat || !statusLine || !panel || topLayoutChanged) {
       requestStatusLinePlacement();
     }
   });
 
-  rootObserver.observe(document.body, {
+  rootObserver.observe(root, {
     childList: true,
     subtree: true,
   });
+}
+
+function observeViewportChanges() {
+  if (viewportListenerBound || typeof globalThis.addEventListener !== "function") {
+    return;
+  }
+
+  globalThis.addEventListener("resize", requestStatusLinePlacement, { passive: true });
+  viewportListenerBound = true;
 }
 
 function scheduleObserveRetry() {

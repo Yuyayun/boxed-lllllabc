@@ -313,6 +313,70 @@
   margin: 6px 0;
 }
 
+/* 全屏美化让 #chat 脱离文档流时，状态条像顶栏一样浮在楼层上方。 */
+#sheld > #boxed-lllllabc-status-line[data-placement="top"][data-top-layout="overlay"] {
+  position: absolute !important;
+  z-index: 32;
+  top: calc(var(--topBarBlockSize, 0px) + 6px);
+  right: 6px;
+  left: 6px;
+  width: auto;
+  height: 31px;
+  margin: 0;
+  overflow: hidden;
+  background: color-mix(
+    in srgb,
+    var(--SmartThemeBlurTintColor, rgb(28, 28, 28)) 72%,
+    transparent
+  );
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.24);
+  -webkit-backdrop-filter: blur(12px) saturate(0.82);
+  backdrop-filter: blur(12px) saturate(0.82);
+}
+
+#sheld > #boxed-lllllabc-status-line[data-placement="top"][data-top-layout="overlay"]
+  > #boxed-lllllabc-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 展开内容使用更实的表面，并覆盖聊天而不改变聊天自身的滚动结构。 */
+#sheld:has(> #boxed-lllllabc-status-line[data-placement="top"][data-top-layout="overlay"])
+  > #boxed-lllllabc-status-panel {
+  position: absolute !important;
+  z-index: 32;
+  top: calc(var(--topBarBlockSize, 0px) + 43px);
+  right: 6px;
+  left: 6px;
+  width: auto;
+  max-height: min(380px, calc(100vh - var(--topBarBlockSize, 0px) - 112px));
+  max-height: min(380px, calc(100dvh - var(--topBarBlockSize, 0px) - 112px));
+  margin: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  background: var(
+    --SmartThemeBlurTintColor,
+    var(--SmartThemeChatTintColor, rgb(28, 28, 28))
+  );
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.34);
+  -webkit-backdrop-filter: blur(18px) saturate(0.86);
+  backdrop-filter: blur(18px) saturate(0.86);
+}
+
+#sheld:has(> #boxed-lllllabc-status-line[data-placement="top"][data-top-layout="overlay"])
+  > #boxed-lllllabc-status-panel
+  > .boxed-lllllabc-panel-body {
+  min-height: 0;
+  max-height: none;
+}
+
+/* 初始位置给状态条留出空间；滚动时楼层仍可进入它的玻璃层下方。 */
+#sheld:has(> #boxed-lllllabc-status-line[data-placement="top"][data-top-layout="overlay"])
+  > #chat {
+  padding-top: calc(var(--topBarBlockSize, 0px) + 43px) !important;
+}
+
 .boxed-lllllabc-status-line:hover {
   border-color: var(--SmartThemeQuoteColor, rgba(128, 128, 128, 0.72));
   background: color-mix(in srgb, var(--SmartThemeChatTintColor, transparent) 88%, var(--SmartThemeBodyColor, transparent) 4%);
@@ -430,7 +494,7 @@
 }
 
 .boxed-lllllabc-info-frame.boxed-lllllabc-dialog-frame {
-  grid-template-rows: auto auto auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 12px;
   width: min(360px, calc(100vw - 24px));
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.28);
@@ -441,21 +505,7 @@
 }
 
 .boxed-lllllabc-info-identity {
-  display: flex;
-  align-items: center;
-  gap: 10px;
   min-width: 0;
-}
-
-.boxed-lllllabc-info-mark {
-  display: grid;
-  place-items: center;
-  flex: 0 0 auto;
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--SmartThemeQuoteColor, currentColor) 16%, transparent);
-  color: var(--SmartThemeQuoteColor, currentColor);
 }
 
 .boxed-lllllabc-info-heading {
@@ -521,17 +571,12 @@
 .boxed-lllllabc-info-footer {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
   padding-top: 10px;
   border-top: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, rgb(128, 128, 128)) 46%, transparent);
 }
 
-.boxed-lllllabc-info-footer > span {
-  opacity: 0.72;
-  font-size: 0.86em;
-}
-
-.boxed-lllllabc-info-repository {
+.boxed-lllllabc-info-action {
   display: inline-grid;
   place-items: center;
   flex: 0 0 auto;
@@ -547,15 +592,81 @@
   text-decoration: none;
 }
 
-.boxed-lllllabc-info-repository:not(:disabled):hover,
-.boxed-lllllabc-info-repository:not(:disabled):focus-visible {
+.boxed-lllllabc-info-action:not(:disabled):hover,
+.boxed-lllllabc-info-action:not(:disabled):focus-visible,
+.boxed-lllllabc-info-changelog-toggle[aria-expanded="true"] {
   border-color: var(--SmartThemeQuoteColor, currentColor);
   background: color-mix(in srgb, var(--SmartThemeQuoteColor, currentColor) 12%, transparent);
 }
 
-.boxed-lllllabc-info-repository:disabled {
+.boxed-lllllabc-info-action:disabled {
   cursor: not-allowed;
   opacity: 0.52;
+}
+
+.boxed-lllllabc-info-changelog {
+  min-height: 0;
+  max-height: min(320px, 42vh);
+  max-height: min(320px, 42dvh);
+  padding: 10px 2px 2px;
+  overflow: auto;
+  border-top: 1px solid color-mix(in srgb, var(--SmartThemeBorderColor, rgb(128, 128, 128)) 46%, transparent);
+  line-height: 1.45;
+  scrollbar-gutter: stable;
+}
+
+.boxed-lllllabc-info-changelog[hidden] {
+  display: none !important;
+}
+
+.boxed-lllllabc-info-changelog-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.boxed-lllllabc-info-changelog-heading > span {
+  flex: 0 0 auto;
+  opacity: 0.68;
+  font-size: 0.82em;
+  font-variant-numeric: tabular-nums;
+}
+
+.boxed-lllllabc-info-changelog h3 {
+  margin: 13px 0 5px;
+  font-size: 0.92em;
+  line-height: 1.35;
+}
+
+.boxed-lllllabc-info-changelog p {
+  margin: 0;
+  opacity: 0.86;
+}
+
+.boxed-lllllabc-info-changelog p + p {
+  margin-top: 7px;
+}
+
+.boxed-lllllabc-info-changelog ul {
+  display: grid;
+  gap: 5px;
+  margin: 5px 0 0;
+  padding-left: 1.35em;
+}
+
+.boxed-lllllabc-info-changelog li {
+  padding-left: 0.08em;
+}
+
+.boxed-lllllabc-info-changelog-message {
+  padding: 2px 0;
+}
+
+.boxed-lllllabc-info-changelog-message[data-tone="error"] {
+  color: var(--SmartThemeBodyColor, inherit);
+  opacity: 1;
 }
 
 .boxed-lllllabc-update-frame {

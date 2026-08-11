@@ -1,5 +1,6 @@
 const UPDATE_DIALOG_ID = "boxed-lllllabc-update-dialog";
 const INFO_DIALOG_ID = "boxed-lllllabc-info-dialog";
+const CHANGELOG_PANEL_ID = "boxed-lllllabc-info-changelog";
 const USAGE_NOTICE = "本扩展可免费使用，禁止任何形式的商业用途。";
 
 let extensionInfo = {
@@ -7,13 +8,19 @@ let extensionInfo = {
   version: "未知",
   author: "辣白菜 / labaicai0969",
   homePage: "",
+  changelogUrl: "",
+  fetchImpl: null,
 };
+let changelogRelease = null;
+let changelogRequest = null;
 
 export async function loadAndRenderExtensionInfo({ manifestUrl, fetchImpl = globalThis.fetch?.bind(globalThis) }) {
   let manifest = {};
   try {
-    const response = await fetchImpl(manifestUrl);
-    if (response.ok) manifest = await response.json();
+    if (typeof fetchImpl === "function") {
+      const response = await fetchImpl(manifestUrl);
+      if (response.ok) manifest = await response.json();
+    }
   } catch (error) {
     console.debug("[boxed-lllllabc] 读取扩展信息失败", error);
   }
@@ -23,10 +30,94 @@ export async function loadAndRenderExtensionInfo({ manifestUrl, fetchImpl = glob
     version: manifest.version || "未知",
     author: manifest.author || "辣白菜 / labaicai0969",
     homePage: manifest.homePage || "",
+    changelogUrl: resolveSiblingAssetUrl(manifestUrl, "CHANGELOG.md"),
+    fetchImpl: typeof fetchImpl === "function" ? fetchImpl : null,
   };
+  changelogRelease = null;
+  changelogRequest = null;
   setText("#boxed-lllllabc-version", `Ver ${extensionInfo.version}`);
   bindInfoToggle();
   return manifest;
+}
+
+export function resolveSiblingAssetUrl(sourceUrl, fileName) {
+  const source = String(sourceUrl ?? "").split(/[?#]/, 1)[0];
+  const lastSlash = source.lastIndexOf("/");
+  return lastSlash >= 0 ? `${source.slice(0, lastSlash + 1)}${fileName}` : fileName;
+}
+
+export function parseVersionChangelog(markdown, version) {
+  const targetVersion = String(version ?? "").trim();
+  if (!targetVersion) return null;
+
+  const lines = String(markdown ?? "").replace(/\r\n?/g, "\n").split("\n");
+  let start = -1;
+  let date = "";
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = /^##\s+(.+?)\s*$/.exec(lines[index]);
+    if (!match) continue;
+    const heading = splitChangelogHeading(match[1]);
+    if (heading.version === targetVersion) {
+      start = index + 1;
+      date = heading.date;
+      break;
+    }
+  }
+
+  if (start < 0) return null;
+
+  let end = lines.length;
+  for (let index = start; index < lines.length; index += 1) {
+    if (/^##\s+/.test(lines[index])) {
+      end = index;
+      break;
+    }
+  }
+
+  const blocks = [];
+  let paragraph = [];
+  const flushParagraph = () => {
+    if (!paragraph.length) return;
+    blocks.push({ type: "paragraph", text: paragraph.join(" ") });
+    paragraph = [];
+  };
+
+  for (const sourceLine of lines.slice(start, end)) {
+    const line = sourceLine.trim();
+    if (!line) {
+      flushParagraph();
+      continue;
+    }
+
+    const section = /^###\s+(.+?)\s*$/.exec(line);
+    if (section) {
+      flushParagraph();
+      blocks.push({ type: "heading", text: section[1] });
+      continue;
+    }
+
+    const item = /^-\s+(.+?)\s*$/.exec(line);
+    if (item) {
+      flushParagraph();
+      const previous = blocks.at(-1);
+      if (previous?.type === "list") previous.items.push(item[1]);
+      else blocks.push({ type: "list", items: [item[1]] });
+      continue;
+    }
+
+    paragraph.push(line);
+  }
+  flushParagraph();
+
+  return { version: targetVersion, date, blocks };
+}
+
+function splitChangelogHeading(value) {
+  const match = /^(.+?)\s+[—–-]\s+(.+)$/.exec(value.trim());
+  return match
+    ? { version: match[1].trim(), date: match[2].trim() }
+    : { version: value.trim(), date: "" };
 }
 
 export function renderUpdateState(state) {
@@ -135,12 +226,6 @@ export function openExtensionInfoDialog({ returnFocusTo } = {}) {
   header.className = "boxed-lllllabc-dialog-header boxed-lllllabc-info-header";
   const identity = document.createElement("div");
   identity.className = "boxed-lllllabc-info-identity";
-  const mark = document.createElement("span");
-  mark.className = "boxed-lllllabc-info-mark";
-  mark.setAttribute("aria-hidden", "true");
-  const markIcon = document.createElement("i");
-  markIcon.className = "fa-solid fa-box-archive";
-  mark.append(markIcon);
   const heading = document.createElement("div");
   heading.className = "boxed-lllllabc-info-heading";
   const title = document.createElement("strong");
@@ -149,7 +234,7 @@ export function openExtensionInfoDialog({ returnFocusTo } = {}) {
   const version = document.createElement("span");
   version.textContent = `版本 ${extensionInfo.version}`;
   heading.append(title, version);
-  identity.append(mark, heading);
+  identity.append(heading);
   const close = createButton("fa-xmark", "", "menu_button boxed-lllllabc-dialog-close");
   close.title = "关闭";
   close.setAttribute("aria-label", "关闭扩展信息");
@@ -176,13 +261,22 @@ export function openExtensionInfoDialog({ returnFocusTo } = {}) {
   const footer = document.createElement("footer");
   footer.className = "boxed-lllllabc-info-footer";
   const repositoryAction = createRepositoryAction(extensionInfo.homePage);
-  const repositoryState = document.createElement("span");
-  repositoryState.textContent = extensionInfo.homePage ? "GitHub 仓库" : "GitHub 仓库尚未发布";
-  footer.append(repositoryAction, repositoryState);
+  const changelogAction = createChangelogAction();
+  footer.append(repositoryAction, changelogAction);
 
-  frame.append(header, body, footer);
+  const changelog = document.createElement("section");
+  changelog.id = CHANGELOG_PANEL_ID;
+  changelog.className = "boxed-lllllabc-info-changelog";
+  changelog.hidden = true;
+  changelog.tabIndex = 0;
+  changelog.setAttribute("role", "region");
+  changelog.setAttribute("aria-label", "当前版本更新日志");
+
+  frame.append(header, body, footer, changelog);
   dialog.append(backdrop, frame);
   document.body.append(dialog);
+
+  changelogAction.addEventListener("click", () => toggleChangelog(changelogAction, changelog));
 
   const finish = () => {
     dialog.remove();
@@ -201,7 +295,7 @@ export function openExtensionInfoDialog({ returnFocusTo } = {}) {
 
 function createRepositoryAction(value) {
   const action = document.createElement(value ? "a" : "button");
-  action.className = "menu_button boxed-lllllabc-info-repository";
+  action.className = "menu_button boxed-lllllabc-info-action boxed-lllllabc-info-repository";
   const label = value ? "打开 GitHub 仓库" : "GitHub 仓库尚未发布";
   action.title = label;
   action.setAttribute("aria-label", label);
@@ -218,6 +312,127 @@ function createRepositoryAction(value) {
   icon.setAttribute("aria-hidden", "true");
   action.append(icon);
   return action;
+}
+
+function createChangelogAction() {
+  const action = createButton(
+    "fa-file-lines",
+    "",
+    "menu_button boxed-lllllabc-info-action boxed-lllllabc-info-changelog-toggle",
+  );
+  action.title = "展开更新日志";
+  action.setAttribute("aria-label", "展开更新日志");
+  action.setAttribute("aria-expanded", "false");
+  action.setAttribute("aria-controls", CHANGELOG_PANEL_ID);
+  return action;
+}
+
+async function toggleChangelog(action, panel) {
+  const willOpen = panel.hidden;
+  panel.hidden = !willOpen;
+  action.setAttribute("aria-expanded", String(willOpen));
+  action.title = willOpen ? "收起更新日志" : "展开更新日志";
+  action.setAttribute("aria-label", action.title);
+  if (!willOpen || panel.dataset.state === "ready" || panel.dataset.state === "loading") return;
+
+  panel.dataset.state = "loading";
+  panel.setAttribute("aria-busy", "true");
+  renderChangelogMessage(panel, "正在读取当前版本的更新日志……");
+
+  try {
+    const release = await loadCurrentChangelog();
+    renderChangelogRelease(panel, release);
+    panel.dataset.state = "ready";
+  } catch (error) {
+    console.debug("[boxed-lllllabc] 读取更新日志失败", error);
+    renderChangelogMessage(
+      panel,
+      "暂时无法读取当前版本的更新日志，请使用旁边的 GitHub 按钮查看仓库中的 CHANGELOG.md。",
+      "error",
+    );
+    panel.dataset.state = "error";
+  } finally {
+    panel.removeAttribute("aria-busy");
+  }
+}
+
+async function loadCurrentChangelog() {
+  if (changelogRelease) return changelogRelease;
+  if (changelogRequest) return changelogRequest;
+
+  changelogRequest = (async () => {
+    if (!extensionInfo.fetchImpl || !extensionInfo.changelogUrl) {
+      throw new Error("更新日志读取功能不可用");
+    }
+
+    const response = await extensionInfo.fetchImpl(extensionInfo.changelogUrl);
+    if (!response.ok) throw new Error(`更新日志请求失败：${response.status}`);
+    const release = parseVersionChangelog(await response.text(), extensionInfo.version);
+    if (!release) throw new Error(`更新日志中没有版本 ${extensionInfo.version}`);
+    changelogRelease = release;
+    return release;
+  })();
+
+  try {
+    return await changelogRequest;
+  } finally {
+    if (!changelogRelease) changelogRequest = null;
+  }
+}
+
+function renderChangelogMessage(panel, message, tone = "loading") {
+  const text = document.createElement("p");
+  text.className = "boxed-lllllabc-info-changelog-message";
+  text.dataset.tone = tone;
+  text.setAttribute("role", tone === "error" ? "alert" : "status");
+  text.textContent = message;
+  panel.replaceChildren(text);
+}
+
+function renderChangelogRelease(panel, release) {
+  const heading = document.createElement("div");
+  heading.className = "boxed-lllllabc-info-changelog-heading";
+  const title = document.createElement("strong");
+  title.textContent = `版本 ${release.version}`;
+  heading.append(title);
+  if (release.date) {
+    const date = document.createElement("span");
+    date.textContent = release.date;
+    heading.append(date);
+  }
+
+  const content = document.createDocumentFragment();
+  content.append(heading);
+  for (const block of release.blocks) {
+    if (block.type === "heading") {
+      const sectionTitle = document.createElement("h3");
+      sectionTitle.textContent = block.text;
+      content.append(sectionTitle);
+      continue;
+    }
+
+    if (block.type === "list") {
+      const list = document.createElement("ul");
+      for (const item of block.items) {
+        const listItem = document.createElement("li");
+        listItem.textContent = item;
+        list.append(listItem);
+      }
+      content.append(list);
+      continue;
+    }
+
+    const paragraph = document.createElement("p");
+    paragraph.textContent = block.text;
+    content.append(paragraph);
+  }
+
+  if (!release.blocks.length) {
+    const empty = document.createElement("p");
+    empty.textContent = "这个版本没有记录具体变更。";
+    content.append(empty);
+  }
+  panel.replaceChildren(content);
 }
 
 function createButton(iconName, text, className) {
