@@ -1,5 +1,9 @@
 import { hashCanonicalChat } from "./canonicalize.js";
 
+export const SAVE_REQUEST_TIMEOUT_MS = 15000;
+
+const SAVE_TIMEOUT = Symbol("save-request-timeout");
+
 export function createSaveRequestPlan({ chat, chatKey, pending }) {
   const safeChat = Array.isArray(chat) ? chat : [];
   const safePending = Array.isArray(pending) ? pending : [];
@@ -48,4 +52,56 @@ export function fingerprintPending(records) {
       chatLength: Number.isInteger(record?.chatLength) ? record.chatLength : null,
     }))
     .sort((left, right) => left.id.localeCompare(right.id)));
+}
+
+export async function waitForSaveRequest({
+  save,
+  timeoutMs = SAVE_REQUEST_TIMEOUT_MS,
+  setTimer = globalThis.setTimeout,
+  clearTimer = globalThis.clearTimeout,
+}) {
+  if (typeof save !== "function") {
+    const error = new Error("当前酒馆版本没有提供聊天保存接口。");
+    return {
+      ok: false,
+      status: "failed",
+      reason: error.message,
+      error,
+    };
+  }
+
+  let timeoutHandle = null;
+  const saveResult = Promise.resolve()
+    .then(() => save())
+    .then(
+      (value) => ({ ok: true, status: "completed", value }),
+      (error) => ({
+        ok: false,
+        status: "failed",
+        reason: error instanceof Error ? error.message : String(error),
+        error,
+      }),
+    );
+  const races = [saveResult];
+  if (Number.isFinite(timeoutMs) && timeoutMs >= 0 && typeof setTimer === "function") {
+    races.push(new Promise((resolve) => {
+      timeoutHandle = setTimer(() => resolve(SAVE_TIMEOUT), timeoutMs);
+    }));
+  }
+
+  try {
+    const result = await Promise.race(races);
+    if (result === SAVE_TIMEOUT) {
+      return {
+        ok: true,
+        status: "timeout",
+        reason: "酒馆保存请求超过 15 秒仍未返回，已转为后台核对。",
+      };
+    }
+    return result;
+  } finally {
+    if (timeoutHandle !== null && typeof clearTimer === "function") {
+      clearTimer(timeoutHandle);
+    }
+  }
 }

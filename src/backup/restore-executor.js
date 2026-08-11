@@ -82,8 +82,12 @@ export async function executeRestorePlan({
     return failure("render", "聊天已经恢复，但界面更新失败。请先核对后端状态再刷新页面。", error, true);
   }
 
+  let saveOutcome;
   try {
-    await save({ current, plan });
+    saveOutcome = await save({ current, plan });
+    if (saveOutcome?.status === "failed") {
+      throw saveOutcome.error ?? new Error(saveOutcome.reason || "保存失败");
+    }
   } catch (error) {
     return failure("save", "聊天已经恢复，但酒馆保存尚未确认。", error, true);
   }
@@ -93,6 +97,7 @@ export async function executeRestorePlan({
     stage: "complete",
     changed: true,
     pendingRecords: restoredPending,
+    saveOutcome: saveOutcome ?? { ok: true, status: "completed" },
   };
 }
 

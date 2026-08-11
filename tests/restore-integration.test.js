@@ -141,6 +141,25 @@ test("保存失败后保留前端恢复内容", async () => {
   assert.equal(chat[1].mes, "丢失楼层");
 });
 
+test("保存等待超时后恢复仍视为成功并保留后台核对线索", async () => {
+  const chat = makeChat(1);
+  const pending = [makePending(1, "丢失楼层")];
+  const plan = createPendingRestorePlan({ chat, chatKey, pending });
+
+  const result = await executeRestorePlan({
+    plan,
+    readCurrent: async () => ({ ok: true, chat, identity: { chatKey } }),
+    readPending: async () => pending,
+    writePending: async () => {},
+    render: async () => {},
+    save: async () => ({ ok: true, status: "timeout" }),
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.saveOutcome.status, "timeout");
+  assert.equal(chat[1].mes, "丢失楼层");
+});
+
 test("历史楼层恢复按替换、pending、渲染、保存的顺序执行", async () => {
   const chat = makeChat(2);
   const calls = [];

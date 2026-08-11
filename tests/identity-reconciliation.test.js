@@ -242,7 +242,7 @@ test("父聊天与两层 Branch 的 metadata 和四类备份始终相互隔离",
   }
 });
 
-test("明确改名目标已有备份时拒绝覆盖", () => {
+test("明确改名目标已有少量备份时进入同聊天合并", () => {
   const rename = buildChatRenameIdentity({
     avatarId: "tester.png",
     oldFileName: "chat-a.jsonl",
@@ -257,10 +257,87 @@ test("明确改名目标已有备份时拒绝覆盖", () => {
   });
 
   assert.deepEqual(result, {
-    status: "conflict",
+    status: "migrate",
     sourceKey: "character:tester.png:chat-a",
-    targetKey: "character:tester.png:renamed-chat",
+    reason: "explicit-rename",
+    mergeTarget: true,
   });
+});
+
+test("明确改名在同一事务中合并目标少量记录并清理旧身份", async () => {
+  const oldKey = "character:tester.png:chat-a";
+  const targetKey = "character:tester.png:chat-b";
+  const rename = buildChatRenameIdentity({
+    avatarId: "tester.png",
+    oldFileName: "chat-a.jsonl",
+    newFileName: "chat-b.jsonl",
+  });
+  const { db, state } = createIdentityDatabase({
+    chatMeta: [
+      {
+        chatKey: oldKey,
+        chatType: "character",
+        characterAvatar: "tester.png",
+        characterName: "旧名称元数据",
+        chatId: "chat-a",
+      },
+      {
+        chatKey: targetKey,
+        chatType: "character",
+        characterAvatar: "tester.png",
+        characterName: "当前名称元数据",
+        chatId: "chat-b",
+      },
+    ],
+    recentMessages: [
+      { chatKey: oldKey, messageIndex: 0, text: "旧 recent", backedUpAt: "2026-08-11T00:00:00.000Z" },
+      { chatKey: oldKey, messageIndex: 1, text: "旧 recent 独有", backedUpAt: "2026-08-11T00:00:00.000Z" },
+      { chatKey: targetKey, messageIndex: 0, text: "新 recent", backedUpAt: "2026-08-11T00:00:01.000Z" },
+    ],
+    pendingChanges: [
+      {
+        id: `${oldKey}:2`, chatKey: oldKey, messageIndex: 2, text: "旧 pending",
+        createdAt: "2026-08-11T00:00:00.000Z", updatedAt: "2026-08-11T00:00:00.000Z",
+      },
+      {
+        id: `${targetKey}:2`, chatKey: targetKey, messageIndex: 2, text: "新 pending",
+        createdAt: "2026-08-11T00:00:01.000Z", updatedAt: "2026-08-11T00:00:01.000Z",
+      },
+    ],
+    fullMessages: [
+      { chatKey: oldKey, messageIndex: 0, text: "旧 full", backedUpAt: "2026-08-11T00:00:00.000Z" },
+      { chatKey: oldKey, messageIndex: 1, text: "旧 full 独有", backedUpAt: "2026-08-11T00:00:00.000Z" },
+      { chatKey: targetKey, messageIndex: 0, text: "新 full", backedUpAt: "2026-08-11T00:00:01.000Z" },
+    ],
+    historicalChanges: [
+      {
+        chatKey: oldKey, messageIndex: 0, text: "旧 historical",
+        firstCapturedAt: "2026-08-11T00:00:00.000Z", updatedAt: "2026-08-11T00:00:00.000Z",
+      },
+      {
+        chatKey: targetKey, messageIndex: 0, text: "新 historical",
+        firstCapturedAt: "2026-08-11T00:00:01.000Z", updatedAt: "2026-08-11T00:00:02.000Z",
+      },
+    ],
+  });
+
+  const result = await migrateRenamedChatIdentity(db, rename);
+
+  assert.equal(result.status, "migrate");
+  assert.equal(result.mergeTarget, true);
+  assert.deepEqual(state.chatMeta.map((meta) => meta.chatKey), [targetKey]);
+  assert.equal(state.chatMeta[0].characterName, "当前名称元数据");
+  for (const name of ["recentMessages", "pendingChanges", "fullMessages", "historicalChanges"]) {
+    assert.equal(state[name].some((record) => record.chatKey === oldKey), false);
+  }
+  assert.equal(state.recentMessages.find((record) => record.messageIndex === 0).text, "新 recent");
+  assert.equal(state.recentMessages.find((record) => record.messageIndex === 1).text, "旧 recent 独有");
+  assert.equal(state.pendingChanges[0].text, "新 pending");
+  assert.equal(state.pendingChanges[0].createdAt, "2026-08-11T00:00:00.000Z");
+  assert.equal(state.fullMessages.find((record) => record.messageIndex === 0).text, "新 full");
+  assert.equal(state.fullMessages.find((record) => record.messageIndex === 1).text, "旧 full 独有");
+  assert.equal(state.historicalChanges[0].text, "新 historical");
+  assert.equal(state.historicalChanges[0].firstCapturedAt, "2026-08-11T00:00:00.000Z");
 });
 
 function createIdentityDatabase(initial) {

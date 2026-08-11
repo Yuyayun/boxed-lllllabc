@@ -7,7 +7,12 @@ import {
   createRecentRestoreOptions,
   createRecentRestorePlan,
 } from "../backup/restore.js";
-import { createSaveRequestPlan, validateSaveRequestPlan } from "../backup/save-request.js";
+import {
+  createSaveRequestPlan,
+  SAVE_REQUEST_TIMEOUT_MS,
+  validateSaveRequestPlan,
+  waitForSaveRequest,
+} from "../backup/save-request.js";
 import { openBackupDatabase, putPendingChanges, replacePendingChanges } from "../db/index.js";
 import { buildVisibleChatSummary } from "../ui/presentation.js";
 import { openRestoreDialog } from "../ui/restore-dialog.js";
@@ -26,6 +31,8 @@ export function createRestoreController({
   refreshVisiblePanel,
   refreshFullBackup,
   refreshHistoricalBackup,
+  saveRequestTimeoutMs = SAVE_REQUEST_TIMEOUT_MS,
+  waitForSave = waitForSaveRequest,
 }) {
   function createRestoreUiState({ current, messages, fullMessages, historicalChanges, pending, meta }) {
     const pendingPlan = createPendingRestorePlan({
@@ -197,7 +204,10 @@ export function createRestoreController({
         if (typeof current.context?.saveChat !== "function") {
           throw new Error("当前酒馆版本没有提供聊天保存接口。");
         }
-        await current.context.saveChat();
+        return waitForSave({
+          save: () => current.context.saveChat(),
+          timeoutMs: saveRequestTimeoutMs,
+        });
       },
     });
 
@@ -206,13 +216,15 @@ export function createRestoreController({
       if (restored.ok && restored.identity.chatKey === plan.chatKey) {
         await refreshBackupsAfterRestore({ current: restored, plan });
         const pending = await readCurrentPending(plan.chatKey);
-        setStatus(createDisplayStatus("checking", "保存中", "", pending));
+        setStatus(createDisplayStatus("checking", "正在核对后端", "", pending));
         scheduleBackendVerification(plan.chatKey, getSettings().backendVerifyDelayMs, 0);
       }
       await refreshVisiblePanel();
     }
 
-    if (result.ok) {
+    if (result.ok && result.saveOutcome?.status === "timeout") {
+      globalThis.toastr?.info?.("酒馆仍在处理保存请求，已继续在后台核对。", "箱装辣白菜");
+    } else if (result.ok) {
       globalThis.toastr?.success?.("恢复内容已提交给酒馆保存。", "箱装辣白菜");
     } else {
       globalThis.toastr?.error?.(result.reason, "箱装辣白菜");
@@ -237,18 +249,19 @@ export function createRestoreController({
       return { ok: false, reason };
     }
 
-    try {
-      await current.context.saveChat();
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : String(error);
-      setStatus(createDisplayStatus("unconfirmed", "后端内容待确认", reason, pending));
+    const saveOutcome = await waitForSave({
+      save: () => current.context.saveChat(),
+      timeoutMs: saveRequestTimeoutMs,
+    });
+    if (!saveOutcome.ok) {
+      setStatus(createDisplayStatus("unconfirmed", "等待确认保存情况", saveOutcome.reason, pending));
       await refreshVisiblePanel();
       globalThis.toastr?.error?.("重新请求保存失败，未保存变更仍会保留。", "箱装辣白菜");
-      return { ok: false, reason };
+      return { ok: false, reason: saveOutcome.reason };
     }
 
     const latestPending = await readCurrentPending(plan.chatKey);
-    setStatus(createDisplayStatus("checking", "保存中", "", latestPending));
+    setStatus(createDisplayStatus("checking", "正在核对后端", "", latestPending));
     if (latestPending.length) {
       scheduleBackendVerification(plan.chatKey, getSettings().backendVerifyDelayMs, 0);
     } else {
@@ -260,8 +273,14 @@ export function createRestoreController({
       );
     }
     await refreshVisiblePanel();
-    globalThis.toastr?.info?.("已请求保存，等待后端确认。", "箱装辣白菜");
-    return { ok: true, reason: "" };
+    const timedOut = saveOutcome.status === "timeout";
+    globalThis.toastr?.info?.(
+      timedOut
+        ? "酒馆仍在处理保存请求，已继续在后台核对。"
+        : "已请求保存，等待后端确认。",
+      "箱装辣白菜",
+    );
+    return { ok: true, reason: "", code: timedOut ? "save-timeout" : "save-requested" };
   }
 
   async function refreshBackupsAfterRestore({ current, plan }) {

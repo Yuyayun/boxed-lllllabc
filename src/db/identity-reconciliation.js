@@ -43,17 +43,19 @@ export function selectExplicitRenameSource({ rename, metas = [] } = {}) {
     && normalizeChatMarker(firstNonEmpty(meta?.chatId, meta?.chatFile)) === sourceChatId
   ));
 
-  if (targetExists && sourceMatches.length) {
-    return { status: "conflict", sourceKey: sourceMatches[0].chatKey, targetKey };
-  }
-  if (targetExists) {
-    return { status: "current", sourceKey: targetKey };
-  }
   if (sourceMatches.length === 1) {
-    return { status: "migrate", sourceKey: sourceMatches[0].chatKey, reason: "explicit-rename" };
+    return {
+      status: "migrate",
+      sourceKey: sourceMatches[0].chatKey,
+      reason: "explicit-rename",
+      mergeTarget: targetExists,
+    };
   }
   if (sourceMatches.length > 1) {
     return { status: "ambiguous", reason: "explicit-rename" };
+  }
+  if (targetExists) {
+    return { status: "current", sourceKey: targetKey };
   }
   return { status: "source-missing", reason: "explicit-rename" };
 }

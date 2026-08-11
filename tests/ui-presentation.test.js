@@ -100,12 +100,12 @@ test("酒馆聊天文件标识可作为聊天名称显示", () => {
 });
 
 test("状态文字只拼接楼层范围，不添加品牌前缀", () => {
-  assert.equal(formatStatusText("后端已保存"), "后端已保存");
+  assert.equal(formatStatusText("酒馆已保存聊天记录"), "酒馆已保存聊天记录");
   assert.equal(
-    formatStatusText("保存中", "已备份第 2 层到第 3 层"),
-    "保存中 · 已备份第 2 层到第 3 层",
+    formatStatusText("正在核对后端", "已备份第 2 层到第 3 层"),
+    "正在核对后端 · 已备份第 2 层到第 3 层",
   );
-  assert.equal(formatStatusText("后端已保存").startsWith("箱装辣白菜："), false);
+  assert.equal(formatStatusText("酒馆已保存聊天记录").startsWith("箱装辣白菜："), false);
 });
 
 test("楼层状态灯默认靠左，开启后居中", () => {

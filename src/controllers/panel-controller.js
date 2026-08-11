@@ -333,8 +333,8 @@ export function createPanelController({
       if (getLatestStatus().code === "full-frozen") {
         const pending = await readCurrentPending(current.identity.chatKey);
         setStatus(pending.length
-          ? createDisplayStatus("checking", "保存中", "", pending)
-          : createDisplayStatus("saved", "后端已保存"));
+          ? createDisplayStatus("checking", "正在核对后端", "", pending)
+          : createDisplayStatus("saved", "酒馆已保存聊天记录"));
       }
     } finally {
       db.close();

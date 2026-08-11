@@ -1,4 +1,4 @@
-import { deletePendingChanges, openBackupDatabase } from "../db/index.js";
+import { deletePendingChangesIfUnchanged, openBackupDatabase } from "../db/index.js";
 import { hashCanonicalChat, stripChatHeader } from "../backup/canonicalize.js";
 import { readBackendChat } from "../verifier/backend-reader.js";
 import { comparePendingWithBackend } from "../verifier/compare.js";
@@ -16,181 +16,278 @@ export function createBackendVerifier({
   confirmFullBackup = async () => null,
   needsFullBackupConfirmation = async () => false,
   readBackend = readBackendChat,
+  deleteConfirmedPending = deleteConfirmedPendingRecords,
   retryDelays = [2000, 5000, 10000],
+  AbortControllerImpl = globalThis.AbortController,
+  setTimer = globalThis.setTimeout,
+  clearTimer = globalThis.clearTimeout,
 }) {
   let verifyTimer = null;
   let verifyRunId = 0;
+  let activeRequest = null;
+  let effectQueue = Promise.resolve();
 
   function scheduleBackendVerification(chatKey, delayMs, retryIndex) {
-    clearScheduledVerification();
-    const runId = ++verifyRunId;
-    verifyTimer = setTimeout(async () => {
-      verifyTimer = null;
-      if (runId !== verifyRunId) {
-        return;
-      }
-
-      await verifyBackendNow({ chatKey, retryIndex });
-    }, delayMs);
+    const runId = beginVerificationRun();
+    scheduleVerificationForRun({ type: "pending", chatKey, delayMs, retryIndex, runId });
   }
 
   function scheduleBackendSnapshotVerification(chatKey, expectedChatHash, delayMs, retryIndex) {
-    clearScheduledVerification();
-    const runId = ++verifyRunId;
-    verifyTimer = setTimeout(async () => {
+    const runId = beginVerificationRun();
+    scheduleVerificationForRun({
+      type: "snapshot",
+      chatKey,
+      expectedChatHash,
+      delayMs,
+      retryIndex,
+      runId,
+    });
+  }
+
+  function scheduleVerificationForRun({
+    type,
+    chatKey,
+    expectedChatHash,
+    delayMs,
+    retryIndex,
+    runId,
+  }) {
+    clearVerificationTimer();
+    if (!isCurrentRun(runId)) {
+      return;
+    }
+    verifyTimer = setTimer(async () => {
       verifyTimer = null;
-      if (runId !== verifyRunId) {
+      if (!isCurrentRun(runId)) {
         return;
       }
-
-      await verifyBackendSnapshotNow({ chatKey, expectedChatHash, retryIndex });
+      if (type === "snapshot") {
+        await runSnapshotVerification({ chatKey, expectedChatHash, retryIndex, runId });
+      } else {
+        await runPendingVerification({ chatKey, retryIndex, runId });
+      }
     }, delayMs);
   }
 
   function clearScheduledVerification() {
-    if (verifyTimer) {
-      clearTimeout(verifyTimer);
-      verifyTimer = null;
-    }
+    clearVerificationTimer();
     verifyRunId += 1;
+    abortActiveRequest();
   }
 
-  async function verifyBackendNow({ chatKey, retryIndex = 0 }) {
+  function beginVerificationRun() {
+    clearScheduledVerification();
+    return verifyRunId;
+  }
+
+  function clearVerificationTimer() {
+    if (verifyTimer !== null) {
+      clearTimer(verifyTimer);
+      verifyTimer = null;
+    }
+  }
+
+  function abortActiveRequest() {
+    activeRequest?.controller?.abort?.();
+    activeRequest = null;
+  }
+
+  function isCurrentRun(runId) {
+    return runId === verifyRunId;
+  }
+
+  function latestStatus() {
+    return getLatestStatus();
+  }
+
+  function verifyBackendNow({ chatKey, retryIndex = 0 }) {
+    return runPendingVerification({ chatKey, retryIndex, runId: beginVerificationRun() });
+  }
+
+  function verifyBackendSnapshotNow({ chatKey, expectedChatHash, retryIndex = 0 }) {
+    return runSnapshotVerification({
+      chatKey,
+      expectedChatHash,
+      retryIndex,
+      runId: beginVerificationRun(),
+    });
+  }
+
+  async function runPendingVerification({ chatKey, retryIndex, runId }) {
     const settings = getSettings();
     if (!settings.enabled) {
-      clearScheduledVerification();
       const status = createDisplayStatus("disabled", "未启用");
-      setStatus(status);
-      await refreshVisiblePanel();
-      return status;
+      return publishStatus(runId, { status, refresh: true });
     }
 
     const current = getContextReader().readCurrentChat();
-    if (!current.ok || current.identity.chatKey !== chatKey) {
-      return getLatestStatus();
+    if (!current.ok || current.identity.chatKey !== chatKey || !isCurrentRun(runId)) {
+      return latestStatus();
     }
 
     const pending = await readCurrentPending(chatKey);
+    if (!isCurrentRun(runId)) {
+      return latestStatus();
+    }
     if (!pending.length) {
-      if (!await needsFullBackupConfirmation(chatKey)) {
-        const status = await prioritizeFullBackupStatus(
-          chatKey,
-          createDisplayStatus("saved", "后端已保存"),
-        );
-        setStatus(status);
-        await updateBackendMeta(chatKey, "saved", []);
-        await refreshVisiblePanel();
-        return status;
+      const needsConfirmation = await needsFullBackupConfirmation(chatKey);
+      if (!isCurrentRun(runId)) {
+        return latestStatus();
       }
-      return verifyBackendSnapshotNow({
+      if (!needsConfirmation) {
+        const requestedStatus = createDisplayStatus("saved", "酒馆已保存聊天记录");
+        const status = await prioritizeFullBackupStatus(chatKey, requestedStatus);
+        return publishStatus(runId, {
+          status,
+          meta: { chatKey, outcome: "saved", pending: [] },
+          refresh: true,
+        });
+      }
+      return runSnapshotVerification({
         chatKey,
         expectedChatHash: hashCanonicalChat(current.chat),
         retryIndex,
+        runId,
       });
     }
 
-    setStatus(await prioritizeFullBackupStatus(
+    const checking = await prioritizeFullBackupStatus(
       chatKey,
-      createDisplayStatus("checking", "保存中", "", pending),
-    ));
+      createDisplayStatus("checking", "正在核对后端", "", pending),
+    );
+    await publishStatus(runId, { status: checking });
+    if (!isCurrentRun(runId)) {
+      return latestStatus();
+    }
 
     try {
-      const backend = await readBackend({ current });
+      const backend = await readBackendForRun({ current, runId });
+      if (!isCurrentRun(runId) || backend?.code === "superseded") {
+        return latestStatus();
+      }
       if (!backend.ok) {
-        return await handleVerificationPending({
+        return handleVerificationPending({
           chatKey,
           pending,
           retryIndex,
           detail: backend.reason,
           outcome: "unavailable",
+          runId,
         });
       }
 
       const needsFullConfirmation = await needsFullBackupConfirmation(chatKey);
+      if (!isCurrentRun(runId)) {
+        return latestStatus();
+      }
       const latestCurrent = needsFullConfirmation ? getContextReader().readCurrentChat() : current;
       if (needsFullConfirmation && (!latestCurrent.ok || latestCurrent.identity.chatKey !== chatKey)) {
-        return getLatestStatus();
+        return latestStatus();
       }
       const backendMatchesCurrent = needsFullConfirmation
         && hashCanonicalChat(stripChatHeader(backend.chat)) === hashCanonicalChat(latestCurrent.chat);
       const comparison = comparePendingWithBackend(pending, backend.chat);
-      const confirmedIds = backendMatchesCurrent
+      const confirmedIds = new Set(backendMatchesCurrent
         ? pending.map((record) => record?.id).filter(Boolean)
-        : comparison.confirmedIds;
-      if (confirmedIds.length) {
-        const db = await openBackupDatabase();
-        try {
-          await deletePendingChanges(db, confirmedIds);
-        } finally {
-          db.close();
+        : comparison.confirmedIds);
+      const confirmedRecords = pending.filter((record) => confirmedIds.has(record?.id));
+      if (confirmedRecords.length) {
+        const deletion = await enqueueEffect(
+          runId,
+          () => deleteConfirmedPending(confirmedRecords, () => isCurrentRun(runId)),
+        );
+        if (!deletion.applied || !isCurrentRun(runId)) {
+          return latestStatus();
         }
       }
 
       const latestPending = await readCurrentPending(chatKey);
+      if (!isCurrentRun(runId)) {
+        return latestStatus();
+      }
       if (!latestPending.length && (!needsFullConfirmation || backendMatchesCurrent)) {
         if (needsFullConfirmation) {
-          const fullStatus = await confirmFullBackup({ current: latestCurrent });
-          if (fullStatus?.code === "db-error") {
-            setStatus(fullStatus);
-            await refreshVisiblePanel();
-            return fullStatus;
+          const confirmation = await enqueueEffect(
+            runId,
+            () => confirmFullBackup({ current: latestCurrent }),
+          );
+          if (!confirmation.applied || !isCurrentRun(runId)) {
+            return latestStatus();
+          }
+          if (confirmation.value?.code === "db-error") {
+            return publishStatus(runId, { status: confirmation.value, refresh: true });
           }
         }
-        const status = await prioritizeFullBackupStatus(
-          chatKey,
-          createDisplayStatus("saved", "后端已保存"),
-        );
-        setStatus(status);
-        await updateBackendMeta(chatKey, "saved", []);
-        await refreshVisiblePanel();
-        return status;
+        const requestedStatus = createDisplayStatus("saved", "酒馆已保存聊天记录");
+        const status = await prioritizeFullBackupStatus(chatKey, requestedStatus);
+        return publishStatus(runId, {
+          status,
+          meta: { chatKey, outcome: "saved", pending: [] },
+          refresh: true,
+        });
       }
 
-      return await handleVerificationPending({
+      return handleVerificationPending({
         chatKey,
         pending: latestPending,
         retryIndex,
         detail: "后端内容尚未与当前聊天完全一致。",
         outcome: "unconfirmed",
+        runId,
       });
     } catch (error) {
+      if (!isCurrentRun(runId) || isAbortError(error)) {
+        return latestStatus();
+      }
       console.warn("[boxed-lllllabc] 后端核对失败", error);
-      return await handleVerificationPending({
+      return handleVerificationPending({
         chatKey,
         pending,
         retryIndex,
         detail: error instanceof Error ? error.message : String(error),
         outcome: "unavailable",
+        runId,
       });
     }
   }
 
-  async function verifyBackendSnapshotNow({ chatKey, expectedChatHash, retryIndex = 0 }) {
+  async function runSnapshotVerification({ chatKey, expectedChatHash, retryIndex, runId }) {
     const settings = getSettings();
     if (!settings.enabled) {
-      clearScheduledVerification();
       const status = createDisplayStatus("disabled", "未启用");
-      setStatus(status);
-      await refreshVisiblePanel();
-      return status;
+      return publishStatus(runId, { status, refresh: true });
     }
 
     const current = getContextReader().readCurrentChat();
-    if (!current.ok || current.identity.chatKey !== chatKey) {
-      return getLatestStatus();
+    if (!current.ok || current.identity.chatKey !== chatKey || !isCurrentRun(runId)) {
+      return latestStatus();
     }
 
     if (hashCanonicalChat(current.chat) !== expectedChatHash) {
-      const status = createDisplayStatus("unconfirmed", "后端内容待确认", "请求保存后当前聊天又发生了变化，请重新请求保存。");
-      setStatus(status);
-      await updateBackendMeta(chatKey, "unconfirmed", []);
-      await refreshVisiblePanel();
-      return status;
+      const status = createDisplayStatus(
+        "unconfirmed",
+        "等待确认保存情况",
+        "请求保存后当前聊天又发生了变化，请重新请求保存。",
+      );
+      return publishStatus(runId, {
+        status,
+        meta: { chatKey, outcome: "unconfirmed", pending: [] },
+        refresh: true,
+      });
     }
 
-    setStatus(createDisplayStatus("checking", "保存中"));
+    await publishStatus(runId, {
+      status: createDisplayStatus("checking", "正在核对后端"),
+    });
+    if (!isCurrentRun(runId)) {
+      return latestStatus();
+    }
+
     try {
-      const backend = await readBackend({ current });
+      const backend = await readBackendForRun({ current, runId });
+      if (!isCurrentRun(runId) || backend?.code === "superseded") {
+        return latestStatus();
+      }
       if (backend.ok && hashCanonicalChat(stripChatHeader(backend.chat)) === expectedChatHash) {
         const latestCurrent = getContextReader().readCurrentChat();
         if (!latestCurrent.ok
@@ -198,28 +295,32 @@ export function createBackendVerifier({
           || hashCanonicalChat(latestCurrent.chat) !== expectedChatHash) {
           const status = createDisplayStatus(
             "unconfirmed",
-            "后端内容待确认",
+            "等待确认保存情况",
             "核对期间当前聊天又发生了变化，请等待下一次核对。",
           );
-          setStatus(status);
-          await updateBackendMeta(chatKey, "unconfirmed", []);
-          await refreshVisiblePanel();
-          return status;
+          return publishStatus(runId, {
+            status,
+            meta: { chatKey, outcome: "unconfirmed", pending: [] },
+            refresh: true,
+          });
         }
-        const fullStatus = await confirmFullBackup({ current: latestCurrent });
-        if (fullStatus?.code === "db-error") {
-          setStatus(fullStatus);
-          await refreshVisiblePanel();
-          return fullStatus;
-        }
-        const status = await prioritizeFullBackupStatus(
-          chatKey,
-          createDisplayStatus("saved", "后端已保存"),
+        const confirmation = await enqueueEffect(
+          runId,
+          () => confirmFullBackup({ current: latestCurrent }),
         );
-        setStatus(status);
-        await updateBackendMeta(chatKey, "saved", []);
-        await refreshVisiblePanel();
-        return status;
+        if (!confirmation.applied || !isCurrentRun(runId)) {
+          return latestStatus();
+        }
+        if (confirmation.value?.code === "db-error") {
+          return publishStatus(runId, { status: confirmation.value, refresh: true });
+        }
+        const requestedStatus = createDisplayStatus("saved", "酒馆已保存聊天记录");
+        const status = await prioritizeFullBackupStatus(chatKey, requestedStatus);
+        return publishStatus(runId, {
+          status,
+          meta: { chatKey, outcome: "saved", pending: [] },
+          refresh: true,
+        });
       }
 
       const detail = backend.ok ? "后端内容尚未与当前聊天一致。" : backend.reason;
@@ -229,14 +330,19 @@ export function createBackendVerifier({
         retryIndex,
         detail,
         outcome: backend.ok ? "unconfirmed" : "unavailable",
+        runId,
       });
     } catch (error) {
+      if (!isCurrentRun(runId) || isAbortError(error)) {
+        return latestStatus();
+      }
       return handleSnapshotVerificationPending({
         chatKey,
         expectedChatHash,
         retryIndex,
         detail: error instanceof Error ? error.message : String(error),
         outcome: "unavailable",
+        runId,
       });
     }
   }
@@ -247,28 +353,37 @@ export function createBackendVerifier({
     retryIndex,
     detail,
     outcome,
+    runId,
   }) {
+    if (!isCurrentRun(runId)) {
+      return latestStatus();
+    }
     if (retryIndex < retryDelays.length) {
-      const status = createDisplayStatus("checking", "保存中", detail);
-      setStatus(status);
-      await updateBackendMeta(chatKey, "checking", []);
-      scheduleBackendSnapshotVerification(
+      const status = createDisplayStatus("checking", "正在核对后端", detail);
+      await publishStatus(runId, {
+        status,
+        meta: { chatKey, outcome: "checking", pending: [] },
+        refresh: true,
+      });
+      scheduleVerificationForRun({
+        type: "snapshot",
         chatKey,
         expectedChatHash,
-        retryDelays[retryIndex],
-        retryIndex + 1,
-      );
-      await refreshVisiblePanel();
-      return status;
+        delayMs: retryDelays[retryIndex],
+        retryIndex: retryIndex + 1,
+        runId,
+      });
+      return isCurrentRun(runId) ? status : latestStatus();
     }
 
     const status = outcome === "unavailable"
       ? createDisplayStatus("verify-unavailable", "无法核对后端", detail)
-      : createDisplayStatus("unconfirmed", "后端内容待确认", detail);
-    setStatus(status);
-    await updateBackendMeta(chatKey, outcome, []);
-    await refreshVisiblePanel();
-    return status;
+      : createDisplayStatus("unconfirmed", "等待确认保存情况", detail);
+    return publishStatus(runId, {
+      status,
+      meta: { chatKey, outcome, pending: [] },
+      refresh: true,
+    });
   }
 
   async function handleVerificationPending({
@@ -277,27 +392,81 @@ export function createBackendVerifier({
     retryIndex,
     detail,
     outcome = "unconfirmed",
+    runId,
   }) {
+    if (!isCurrentRun(runId)) {
+      return latestStatus();
+    }
     if (retryIndex < retryDelays.length) {
-      const status = await prioritizeFullBackupStatus(
+      const requestedStatus = createDisplayStatus("checking", "正在核对后端", detail, pending);
+      const status = await prioritizeFullBackupStatus(chatKey, requestedStatus);
+      await publishStatus(runId, {
+        status,
+        meta: { chatKey, outcome: "checking", pending },
+        refresh: true,
+      });
+      scheduleVerificationForRun({
+        type: "pending",
         chatKey,
-        createDisplayStatus("checking", "保存中", detail, pending),
-      );
-      setStatus(status);
-      await updateBackendMeta(chatKey, "checking", pending);
-      scheduleBackendVerification(chatKey, retryDelays[retryIndex], retryIndex + 1);
-      await refreshVisiblePanel();
-      return status;
+        delayMs: retryDelays[retryIndex],
+        retryIndex: retryIndex + 1,
+        runId,
+      });
+      return isCurrentRun(runId) ? status : latestStatus();
     }
 
     const requestedStatus = outcome === "unavailable"
       ? createDisplayStatus("verify-unavailable", "无法核对后端", detail, pending)
-      : createDisplayStatus("unconfirmed", "后端内容待确认", detail, pending);
+      : createDisplayStatus("unconfirmed", "等待确认保存情况", detail, pending);
     const status = await prioritizeFullBackupStatus(chatKey, requestedStatus);
-    setStatus(status);
-    await updateBackendMeta(chatKey, outcome, pending);
-    await refreshVisiblePanel();
-    return status;
+    return publishStatus(runId, {
+      status,
+      meta: { chatKey, outcome, pending },
+      refresh: true,
+    });
+  }
+
+  async function readBackendForRun({ current, runId }) {
+    if (!isCurrentRun(runId)) {
+      return { ok: false, code: "superseded" };
+    }
+    const controller = typeof AbortControllerImpl === "function"
+      ? new AbortControllerImpl()
+      : null;
+    activeRequest = { runId, controller };
+    try {
+      return await readBackend({ current, signal: controller?.signal });
+    } finally {
+      if (activeRequest?.runId === runId && activeRequest.controller === controller) {
+        activeRequest = null;
+      }
+    }
+  }
+
+  function enqueueEffect(runId, effect) {
+    const operation = effectQueue.catch(() => undefined).then(async () => {
+      if (!isCurrentRun(runId)) {
+        return { applied: false, value: undefined };
+      }
+      const value = await effect();
+      return { applied: true, value };
+    });
+    effectQueue = operation.then(() => undefined, () => undefined);
+    return operation;
+  }
+
+  async function publishStatus(runId, { status, meta = null, refresh = false }) {
+    const published = await enqueueEffect(runId, async () => {
+      setStatus(status);
+      if (meta) {
+        await updateBackendMeta(meta.chatKey, meta.outcome, meta.pending);
+      }
+      if (refresh && isCurrentRun(runId)) {
+        await refreshVisiblePanel();
+      }
+      return status;
+    });
+    return published.applied && isCurrentRun(runId) ? status : latestStatus();
   }
 
   return {
@@ -308,4 +477,17 @@ export function createBackendVerifier({
     verifyBackendSnapshotNow,
     verifyBackendNow,
   };
+}
+
+async function deleteConfirmedPendingRecords(records, shouldDelete) {
+  const db = await openBackupDatabase();
+  try {
+    return await deletePendingChangesIfUnchanged(db, records, { shouldDelete });
+  } finally {
+    db.close();
+  }
+}
+
+function isAbortError(error) {
+  return error?.name === "AbortError";
 }

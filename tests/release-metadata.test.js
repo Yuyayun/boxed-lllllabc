@@ -12,12 +12,14 @@ async function readProjectFile(path) {
 test("发布元数据指向真实 GitHub 仓库", async () => {
   const manifest = JSON.parse(await readProjectFile("manifest.json"));
   const packageJson = JSON.parse(await readProjectFile("package.json"));
+  const changelog = await readProjectFile("CHANGELOG.md");
 
   assert.equal(manifest.homePage, REPOSITORY_URL);
-  assert.equal(manifest.version, "0.1.3");
+  assert.equal(manifest.version, "0.1.4");
   assert.equal(packageJson.version, manifest.version);
   assert.equal(packageJson.homepage, REPOSITORY_URL);
   assert.equal(packageJson.repository.url, `git+${REPOSITORY_URL}.git`);
+  assert.match(changelog, new RegExp(`^##\\s+${manifest.version.replaceAll(".", "\\.")}(?:\\s|$)`, "m"));
 });
 
 test("发布元数据注册安装与更新后的自动刷新钩子", async () => {

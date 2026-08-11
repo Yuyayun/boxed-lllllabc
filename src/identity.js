@@ -173,7 +173,13 @@ export function resolveChatRenameTarget(rename, currentIdentity) {
     ? normalizePart(currentMeta.groupId)
     : normalizePart(currentMeta.characterAvatar);
   const currentChatId = normalizeChatFileMarker(firstValue(currentMeta.chatId, currentMeta.chatFile));
-  if (currentOwner !== rename.source.ownerId || !currentChatId || currentChatId === rename.source.chatId) {
+  const renameTargetId = normalizeChatFileMarker(firstValue(
+    rename.identity?.meta?.chatId,
+    rename.identity?.meta?.chatFile,
+  ));
+  if (currentOwner !== rename.source.ownerId
+    || !currentChatId
+    || !chatRenameTargetsMatch(renameTargetId, currentChatId)) {
     return rename;
   }
 
@@ -181,6 +187,16 @@ export function resolveChatRenameTarget(rename, currentIdentity) {
     ...rename,
     identity: currentIdentity,
   };
+}
+
+function chatRenameTargetsMatch(requestedTarget, currentTarget) {
+  if (requestedTarget === currentTarget) {
+    return true;
+  }
+  const sanitizedRequested = String(requestedTarget ?? "")
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, "_")
+    .replace(/_+/g, "_");
+  return sanitizedRequested === currentTarget;
 }
 
 function buildLegacyChatKeys({

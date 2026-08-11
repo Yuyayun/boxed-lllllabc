@@ -236,7 +236,8 @@ async function migrateIdentityRecords({ stores, metas, identity, selection }) {
   const metaStore = stores.get(STORES.chatMeta);
   const sourceKey = selection.sourceKey;
   const targetKey = identity.chatKey;
-  if (metas.some((meta) => meta.chatKey === targetKey && meta.chatKey !== sourceKey)) {
+  const allowTargetMerge = selection.reason === "explicit-rename";
+  if (!allowTargetMerge && metas.some((meta) => meta.chatKey === targetKey && meta.chatKey !== sourceKey)) {
     return { status: "conflict", sourceKey, targetKey };
   }
 
@@ -256,24 +257,86 @@ async function migrateIdentityRecords({ stores, metas, identity, selection }) {
     return { ...config, store, sourceRecords, targetRecords };
   }));
 
-  if (recordSets.some(({ targetRecords }) => targetRecords.length > 0)) {
+  if (!allowTargetMerge && recordSets.some(({ targetRecords }) => targetRecords.length > 0)) {
     return { status: "conflict", sourceKey, targetKey };
   }
 
-  for (const { type, store, sourceRecords } of recordSets) {
+  for (const { type, store, sourceRecords, targetRecords } of recordSets) {
+    const migratedRecords = allowTargetMerge
+      ? mergeRenamedBackupRecords({ type, sourceRecords, targetRecords, targetKey })
+      : sourceRecords.map((record) => rekeyBackupRecord(record, targetKey, type));
+    for (const record of migratedRecords) {
+      await requestToPromise(store.put(record));
+    }
     for (const record of sourceRecords) {
-      await requestToPromise(store.put(rekeyBackupRecord(record, targetKey, type)));
       await requestToPromise(store.delete(primaryKeyForRecord(record, type)));
     }
   }
 
   const sourceMeta = metas.find((meta) => meta.chatKey === sourceKey);
+  const targetMeta = metas.find((meta) => meta.chatKey === targetKey);
   await requestToPromise(metaStore.put({
-    ...mergeIdentityMeta(sourceMeta, identity.meta),
+    ...mergeIdentityMeta(mergeIdentityMeta(sourceMeta, targetMeta), identity.meta),
     chatKey: targetKey,
   }));
   await requestToPromise(metaStore.delete(sourceKey));
   return { ...selection, targetKey };
+}
+
+function mergeRenamedBackupRecords({ type, sourceRecords, targetRecords, targetKey }) {
+  const merged = new Map();
+  for (const record of sourceRecords) {
+    const migrated = rekeyBackupRecord(record, targetKey, type);
+    merged.set(renameRecordKey(migrated, type), migrated);
+  }
+  for (const record of targetRecords) {
+    const target = { ...record, chatKey: targetKey };
+    const key = renameRecordKey(target, type);
+    merged.set(key, mergeRenameRecord(merged.get(key), target, type));
+  }
+  return [...merged.values()];
+}
+
+function mergeRenameRecord(source, target, type) {
+  if (!source) {
+    return target;
+  }
+  const preferred = recordTimestamp(source) > recordTimestamp(target) ? source : target;
+  if (type === "historical") {
+    return {
+      ...preferred,
+      firstCapturedAt: earliestTimestamp(source.firstCapturedAt, target.firstCapturedAt),
+    };
+  }
+  if (type === "pending") {
+    return {
+      ...preferred,
+      createdAt: earliestTimestamp(source.createdAt, target.createdAt),
+    };
+  }
+  return preferred;
+}
+
+function renameRecordKey(record, type) {
+  return type === "pending" ? String(record?.id ?? "") : String(record?.messageIndex ?? "");
+}
+
+function recordTimestamp(record) {
+  for (const value of [record?.updatedAt, record?.backedUpAt, record?.message?.backedUpAt, record?.createdAt]) {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return 0;
+}
+
+function earliestTimestamp(...values) {
+  const valid = values
+    .map((value) => ({ value, timestamp: Date.parse(value) }))
+    .filter((item) => item.value && Number.isFinite(item.timestamp))
+    .sort((left, right) => left.timestamp - right.timestamp);
+  return valid[0]?.value ?? values.find(Boolean) ?? "";
 }
 
 export async function deleteBackupTypeForChat(db, {
@@ -437,6 +500,50 @@ export async function deletePendingChanges(db, ids) {
     for (const id of safeIds) {
       await requestToPromise(store.delete(id));
     }
+  });
+}
+
+export async function deletePendingChangesIfUnchanged(db, expectedRecords, {
+  shouldDelete = () => true,
+} = {}) {
+  const safeRecords = Array.isArray(expectedRecords)
+    ? expectedRecords.filter((record) => record?.id)
+    : [];
+  if (!safeRecords.length) {
+    return [];
+  }
+
+  return runTransaction(db, [STORES.pendingChanges], "readwrite", async (stores) => {
+    const store = stores.get(STORES.pendingChanges);
+    const deletedIds = [];
+    for (const expected of safeRecords) {
+      const current = await requestToPromise(store.get(expected.id));
+      if (!shouldDelete()
+        || pendingDeletionFingerprint(current) !== pendingDeletionFingerprint(expected)) {
+        continue;
+      }
+      await requestToPromise(store.delete(expected.id));
+      deletedIds.push(expected.id);
+    }
+    return deletedIds;
+  });
+}
+
+export function pendingDeletionFingerprint(record) {
+  if (!record?.id) {
+    return "";
+  }
+  return JSON.stringify({
+    id: record.id,
+    chatKey: record.chatKey ?? "",
+    messageIndex: Number.isInteger(record.messageIndex) ? record.messageIndex : null,
+    kind: record.kind ?? "",
+    hashVersion: record.hashVersion ?? "",
+    canonicalHash: record.canonicalHash ?? "",
+    canonicalChatHash: record.canonicalChatHash ?? "",
+    chatLength: Number.isInteger(record.chatLength) ? record.chatLength : null,
+    createdAt: record.createdAt ?? "",
+    updatedAt: record.updatedAt ?? "",
   });
 }
 

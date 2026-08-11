@@ -75,6 +75,7 @@ function initializeControllers() {
     scheduleBackendVerification: (...args) => backendVerifier.scheduleBackendVerification(...args),
     scheduleBackendSnapshotVerification: (...args) => backendVerifier.scheduleBackendSnapshotVerification(...args),
     verificationRetryLimit: verifyRetryDelays.length,
+    eventTypes: event_types,
   });
 
   backendVerifier = createBackendVerifier({

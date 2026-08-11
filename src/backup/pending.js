@@ -85,7 +85,7 @@ export function summarizePendingChanges(records) {
       count: safeRecords.length,
       firstIndex: null,
       lastIndex: null,
-      rangeText: safeRecords.length ? "已备份结构性变更" : "",
+      rangeText: safeRecords.length ? "已备份这次改动" : "",
     };
   }
 

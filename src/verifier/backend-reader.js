@@ -1,4 +1,17 @@
-export async function readBackendChat({ current, fetchImpl = globalThis.fetch }) {
+export const BACKEND_READ_TIMEOUT_MS = 15000;
+
+const READ_TIMEOUT = Symbol("backend-read-timeout");
+const READ_SUPERSEDED = Symbol("backend-read-superseded");
+
+export async function readBackendChat({
+  current,
+  fetchImpl = globalThis.fetch,
+  signal,
+  timeoutMs = BACKEND_READ_TIMEOUT_MS,
+  AbortControllerImpl = globalThis.AbortController,
+  setTimer = globalThis.setTimeout,
+  clearTimer = globalThis.clearTimeout,
+}) {
   const request = buildBackendChatRequest(current);
   if (!request.ok) {
     return request;
@@ -11,34 +24,101 @@ export async function readBackendChat({ current, fetchImpl = globalThis.fetch })
     };
   }
 
+  if (signal?.aborted) {
+    return supersededResult();
+  }
+
+  const controller = typeof AbortControllerImpl === "function"
+    ? new AbortControllerImpl()
+    : null;
+  let timeoutHandle = null;
+  let timedOut = false;
+  let superseded = false;
+  let removeAbortListener = () => {};
+  const races = [];
+
+  if (Number.isFinite(timeoutMs) && timeoutMs >= 0 && typeof setTimer === "function") {
+    races.push(new Promise((resolve) => {
+      timeoutHandle = setTimer(() => {
+        timedOut = true;
+        resolve(READ_TIMEOUT);
+        controller?.abort?.();
+      }, timeoutMs);
+    }));
+  }
+
+  if (signal && typeof signal.addEventListener === "function") {
+    races.push(new Promise((resolve) => {
+      const onAbort = () => {
+        superseded = true;
+        resolve(READ_SUPERSEDED);
+        controller?.abort?.();
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      removeAbortListener = () => signal.removeEventListener?.("abort", onAbort);
+    }));
+  }
+
   const headers = getRequestHeaders(current);
-  const response = await fetchImpl(request.endpoint, {
+  const fetchPromise = Promise.resolve().then(() => fetchImpl(request.endpoint, {
     method: "POST",
     headers,
     body: JSON.stringify(request.body),
     cache: "no-cache",
-  });
+    signal: controller?.signal ?? signal,
+  }));
+  races.unshift(fetchPromise);
 
-  if (!response.ok) {
+  let response;
+  try {
+    response = await Promise.race(races);
+    if (response === READ_TIMEOUT) {
+      return timeoutResult();
+    }
+    if (response === READ_SUPERSEDED) {
+      return supersededResult();
+    }
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        reason: "后端读取失败。",
+        status: response.status,
+      };
+    }
+
+    const chat = await raceRead(response.json(), races.slice(1));
+    if (chat === READ_TIMEOUT) {
+      return timeoutResult();
+    }
+    if (chat === READ_SUPERSEDED) {
+      return supersededResult();
+    }
+    if (!Array.isArray(chat)) {
+      return {
+        ok: false,
+        reason: "后端返回的聊天格式不可用。",
+      };
+    }
+
     return {
-      ok: false,
-      reason: "后端读取失败。",
-      status: response.status,
+      ok: true,
+      chat,
     };
+  } catch (error) {
+    if (superseded || signal?.aborted) {
+      return supersededResult();
+    }
+    if (timedOut) {
+      return timeoutResult();
+    }
+    throw error;
+  } finally {
+    if (timeoutHandle !== null && typeof clearTimer === "function") {
+      clearTimer(timeoutHandle);
+    }
+    removeAbortListener();
   }
-
-  const chat = await response.json();
-  if (!Array.isArray(chat)) {
-    return {
-      ok: false,
-      reason: "后端返回的聊天格式不可用。",
-    };
-  }
-
-  return {
-    ok: true,
-    chat,
-  };
 }
 
 export function buildBackendChatRequest(current) {
@@ -46,7 +126,7 @@ export function buildBackendChatRequest(current) {
   if (!meta) {
     return {
       ok: false,
-      reason: "当前聊天身份不可用。",
+      reason: "无法确认当前聊天文件。",
     };
   }
 
@@ -83,6 +163,26 @@ export function buildBackendChatRequest(current) {
       file_name: stripJsonl(fileName),
     },
   };
+}
+
+function timeoutResult() {
+  return {
+    ok: false,
+    code: "timeout",
+    reason: "后端读取超过 15 秒，已停止等待。",
+  };
+}
+
+function supersededResult() {
+  return {
+    ok: false,
+    code: "superseded",
+    reason: "本次核对已被新的核对取代。",
+  };
+}
+
+function raceRead(readPromise, cancellationRaces) {
+  return Promise.race([Promise.resolve(readPromise), ...cancellationRaces]);
 }
 
 function getRequestHeaders(current) {

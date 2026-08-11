@@ -174,3 +174,10 @@ test("群聊后端请求使用群聊文件标识", () => {
     id: "group-chat",
   });
 });
+
+test("身份不足时使用面向用户的聊天文件说明", () => {
+  const request = buildBackendChatRequest({ identity: {} });
+
+  assert.equal(request.ok, false);
+  assert.equal(request.reason, "无法确认当前聊天文件。");
+});

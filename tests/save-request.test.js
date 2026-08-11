@@ -2,7 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createMessageRecord } from "../src/backup/pending.js";
-import { createSaveRequestPlan, validateSaveRequestPlan } from "../src/backup/save-request.js";
+import {
+  createSaveRequestPlan,
+  validateSaveRequestPlan,
+  waitForSaveRequest,
+} from "../src/backup/save-request.js";
 import { createRestoreController } from "../src/controllers/restore-controller.js";
 import { buildSaveRequestDialogModel } from "../src/ui/save-request-dialog.js";
 
@@ -113,6 +117,48 @@ test("重新请求保存抛错时保留 pending 且不安排成功核对", async
   ]);
 });
 
+test("saveChat 超时不是保存失败并继续安排后端核对", async () => {
+  const chat = makeChat();
+  const pending = [makePending(1, "第二层")];
+  const plan = createSaveRequestPlan({ chat, chatKey, pending });
+  const calls = [];
+  const controller = createController({
+    chat,
+    pending,
+    saveRequestTimeoutMs: 5,
+    saveChat: async () => new Promise(() => {}),
+    setStatus(status) { calls.push(["status", status.code]); },
+    scheduleBackendVerification(...args) { calls.push(["verify", ...args]); },
+    async refreshVisiblePanel() { calls.push(["panel"]); },
+  });
+
+  const result = await controller.requestSave(plan);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.code, "save-timeout");
+  assert.deepEqual(calls, [
+    ["status", "checking"],
+    ["verify", chatKey, 2500, 0],
+    ["panel"],
+  ]);
+});
+
+test("保存等待器超时后会吸收原请求稍后的拒绝", async () => {
+  let rejectSave;
+  const savePromise = new Promise((_resolve, reject) => {
+    rejectSave = reject;
+  });
+  const result = await waitForSaveRequest({
+    save: () => savePromise,
+    timeoutMs: 5,
+  });
+  rejectSave(new Error("迟到的失败"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(result.ok, true);
+  assert.equal(result.status, "timeout");
+});
+
 test("重新请求保存确认模型使用中文说明 pending 范围", () => {
   const pending = [makePending(1, "第二层"), makePending(2, "第三层")];
   const model = buildSaveRequestDialogModel({
@@ -194,6 +240,7 @@ function createController({
   scheduleBackendVerification,
   scheduleBackendSnapshotVerification,
   refreshVisiblePanel,
+  saveRequestTimeoutMs,
 }) {
   return createRestoreController({
     getContextReader: () => ({
@@ -219,6 +266,7 @@ function createController({
     refreshVisiblePanel,
     refreshFullBackup: async () => {},
     refreshHistoricalBackup: async () => {},
+    saveRequestTimeoutMs,
   });
 }
 

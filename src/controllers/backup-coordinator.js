@@ -23,7 +23,16 @@ import {
   updateChatMetaSummary,
 } from "../db/index.js";
 import { buildChatRenameIdentity, resolveChatRenameTarget } from "../identity.js";
+import { readOwnerChatCatalog } from "../rename/chat-catalog.js";
+import {
+  confirmLegacyRenameWithStoredIntegrity,
+  createLegacyRenameObservation,
+  detectLegacyChatRename,
+  shouldRefreshLegacyRenameCatalog,
+  updateLegacyRenameObservation,
+} from "../rename/legacy-rename.js";
 import { formatStatusText } from "../ui/presentation.js";
+import { readBackendChat } from "../verifier/backend-reader.js";
 
 export function createBackupCoordinator({
   getContextReader,
@@ -37,7 +46,15 @@ export function createBackupCoordinator({
   scheduleBackendVerification,
   scheduleBackendSnapshotVerification,
   verificationRetryLimit,
+  eventTypes = {},
+  readChatCatalog = readOwnerChatCatalog,
+  openRenameDatabase = openBackupDatabase,
+  migrateRename = migrateRenamedChatIdentity,
+  readRenameSourceMeta = readStoredChatMeta,
+  readRenameBackend = readBackendChat,
 }) {
+  let legacyRenameObservation = null;
+
   async function runBackupNow(trigger = {}) {
     const eventName = typeof trigger === "string" ? trigger : trigger.eventName || "manual";
     const args = typeof trigger === "string" ? [] : trigger.args || [];
@@ -61,6 +78,13 @@ export function createBackupCoordinator({
       setStatus(status);
       await refreshVisiblePanel();
       return status;
+    }
+
+    const legacyRenameStatus = await reconcileLegacyRename({ current, triggers: triggerList });
+    if (legacyRenameStatus?.code === "db-error") {
+      setStatus(legacyRenameStatus);
+      await refreshVisiblePanel();
+      return legacyRenameStatus;
     }
 
     const identityStatus = await reconcileCurrentIdentity(current.identity);
@@ -134,10 +158,10 @@ export function createBackupCoordinator({
     const requestedStatus = fullStatus?.code === "full-frozen"
       ? fullStatus
       : fullStatus?.code === "full-awaiting-confirmation"
-        ? createDisplayStatus("checking", "保存中", "正在确认其他扩展写入的聊天数据。", pending)
+        ? createDisplayStatus("checking", "正在核对后端", "正在确认其他扩展写入的聊天数据。", pending)
       : pending.length
-        ? createDisplayStatus("checking", "保存中", "", pending)
-        : createDisplayStatus("saved", "后端已保存");
+        ? createDisplayStatus("checking", "正在核对后端", "", pending)
+        : createDisplayStatus("saved", "酒馆已保存聊天记录");
     const status = await prioritizeFullBackupStatus(current.identity.chatKey, requestedStatus);
 
     setStatus(status);
@@ -317,13 +341,85 @@ export function createBackupCoordinator({
       console.warn(`[boxed-lllllabc] 已忽略无法确认身份的聊天改名事件：${eventRename.reason}`);
       return { status: "invalid", reason: eventRename.reason };
     }
+    const contextReader = getContextReader();
     const current = contextReader.readCurrentChat();
     const rename = resolveChatRenameTarget(eventRename, current.ok ? current.identity : null);
 
+    return migrateRenameIdentity(rename);
+  }
+
+  async function reconcileLegacyRename({ current, triggers }) {
+    if (!shouldRefreshLegacyRenameCatalog({
+      previous: legacyRenameObservation,
+      current,
+      triggers,
+      eventTypes,
+    })) {
+      legacyRenameObservation = updateLegacyRenameObservation(legacyRenameObservation, current);
+      return null;
+    }
+
+    let catalog;
     try {
-      const db = await openBackupDatabase();
+      catalog = await readChatCatalog({ current });
+    } catch (error) {
+      console.warn("[boxed-lllllabc] 旧版酒馆改名识别无法读取聊天文件列表", error);
+      legacyRenameObservation = null;
+      return null;
+    }
+    if (!catalog?.ok) {
+      console.warn(`[boxed-lllllabc] 旧版酒馆改名识别已跳过：${catalog?.reason || "聊天文件列表不可用。"}`);
+      legacyRenameObservation = null;
+      return null;
+    }
+
+    const nextObservation = createLegacyRenameObservation({
+      current,
+      catalogEntries: catalog.entries,
+    });
+    const detection = detectLegacyChatRename({
+      previous: legacyRenameObservation,
+      next: nextObservation,
+      triggers,
+      eventTypes,
+    });
+    legacyRenameObservation = nextObservation;
+    let rename = detection.status === "rename" ? detection.rename : null;
+    if (detection.status === "ambiguous" && detection.rename) {
       try {
-        const result = await migrateRenamedChatIdentity(db, rename);
+        const confirmed = await confirmLegacyRenameWithStoredIntegrity({
+          rename: detection.rename,
+          current,
+          readSourceMeta: readRenameSourceMeta,
+          readBackend: readRenameBackend,
+        });
+        if (confirmed) {
+          rename = detection.rename;
+        }
+      } catch (error) {
+        console.warn("[boxed-lllllabc] 疑似聊天改名的 integrity 复核失败", error);
+      }
+    }
+    if (!rename) {
+      if (detection.status === "ambiguous") {
+        console.warn("[boxed-lllllabc] 发现疑似聊天改名，但证据不足；旧备份已原样保留。", detection);
+      }
+      return null;
+    }
+
+    const result = await migrateRenameIdentity(rename);
+    if (result.status === "error") {
+      return createBackupStatus("db-error", "本地备份不可用", result.error);
+    }
+    return null;
+  }
+
+  async function migrateRenameIdentity(rename) {
+
+    try {
+      const db = await openRenameDatabase();
+      try {
+        const result = await migrateRename(db, rename);
         if (result.status === "conflict") {
           console.warn("[boxed-lllllabc] 聊天改名目标已有独立备份，已保留两边记录且没有覆盖。");
         } else if (result.status === "ambiguous") {
@@ -474,4 +570,13 @@ export function dedupeHistoricalRecords(records) {
     latestByFloor.set(`${record.chatKey}:${record.messageIndex}`, record);
   }
   return [...latestByFloor.values()];
+}
+
+async function readStoredChatMeta(chatKey) {
+  const db = await openBackupDatabase();
+  try {
+    return await getChatMeta(db, chatKey);
+  } finally {
+    db.close();
+  }
 }

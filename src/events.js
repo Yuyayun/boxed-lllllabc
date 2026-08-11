@@ -137,8 +137,10 @@ export function pickEventNames(eventTypes = {}) {
     eventTypes.GENERATION_ENDED,
     eventTypes.GENERATION_STOPPED,
     eventTypes.CHAT_CREATED,
+    eventTypes.GROUP_CHAT_CREATED,
     eventTypes.CHAT_RENAMED,
     eventTypes.CHAT_DELETED,
+    eventTypes.GROUP_CHAT_DELETED,
     eventTypes.GROUP_UPDATED,
   ].filter(Boolean);
 }

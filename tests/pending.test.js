@@ -47,6 +47,12 @@ test("pending 摘要能汇总首尾楼层", () => {
   assert.equal(summary.rangeText, "已备份第 107 层到第 108 层");
 });
 
+test("结构变化使用简短易懂的备份说明", () => {
+  const summary = summarizePendingChanges([{ id: "structural", messageIndex: null }]);
+
+  assert.equal(summary.rangeText, "已备份这次改动");
+});
+
 test("新增 swipe 的空槽过渡状态不创建 pending", () => {
   const records = createPendingRecords({
     chatKey: "character:1:chat-a",
