@@ -2,6 +2,7 @@ const names = { indexeddb: 'IndexedDB', sqlite: 'SQLite' };
 export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerating = () => false, afterChange = async () => {} }) {
   let modal;
   let progressText;
+  let resultSelector = '#boxed-lllllabc-transfer-result';
   const text = (selector, value) => { const node = document.querySelector(selector); if (node) node.textContent = value; };
   function close() { modal?.close(); modal?.remove(); modal = null; }
   function frame(title) {
@@ -34,15 +35,23 @@ export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerati
     const state=await control.read();
     text('#boxed-lllllabc-storage-mode',names[state.active]);
     const health=await sqlite.status();
-    text('#boxed-lllllabc-sqlite-state',health.ok ? 'SQLite 已连接（可选）' : health.reason);
+    const writable=health.ok && health.database?.writable===true;
+    text('#boxed-lllllabc-sqlite-state',health.ok ? writable ? 'SQLite 插件已连接，可写入（可选）'
+      : health.database?.writable===false ? 'SQLite 插件已连接，当前不可写入' : 'SQLite 插件已连接，写入权限未确认' : health.reason);
     const switchButton=document.querySelector('#boxed-lllllabc-switch-storage');
     const clearButton=document.querySelector('#boxed-lllllabc-clear-inactive');
-    if (switchButton) switchButton.disabled=!!state.journal || state.active==='indexeddb' && !health.ok;
-    if (clearButton) { clearButton.disabled=!!state.journal || !state.lastTransfer || !state.previous || state.previous===state.active; clearButton.textContent=state.previous ? `清空旧端数据（${names[state.previous]}）` : '清空旧端数据'; }
+    if (switchButton) switchButton.disabled=!!state.journal || state.active==='indexeddb' && !writable;
+    const clearReason=state.journal ? '存在未完成的存储操作，请先恢复。'
+      : !state.lastTransfer || !state.previous || state.previous===state.active ? '完成存储切换后，才可清空保留的旧端数据。'
+      : !health.ok ? 'SQLite 插件当前不可用，请先恢复连接，再清空旧端数据。'
+      : !writable ? health.database?.writable===false ? 'SQLite 插件当前不可写入，暂不能清空旧端数据。' : 'SQLite 插件写入权限未确认，暂不能清空旧端数据。'
+      : `仅清空非活动端 ${names[state.previous]} 的箱装备份与快照；当前 ${names[state.active]}、备份开关和酒馆聊天文件保留。`;
+    if (clearButton) { clearButton.disabled=!!state.journal || !state.lastTransfer || !state.previous || state.previous===state.active || !writable; clearButton.textContent=state.previous ? `清空旧端数据（${names[state.previous]}）` : '清空旧端数据'; }
+    text('#boxed-lllllabc-clear-help',clearReason);
     return state;
   }
   async function failure(error) {
-    text('#boxed-lllllabc-transfer-result',error.message);
+    text(resultSelector,error.message);
     let pending = true;
     try { pending = Boolean((await control.read()).journal); }
     catch { /* Unreadable control state must keep the page locked as well. */ }
@@ -52,9 +61,10 @@ export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerati
     } else close();
   }
   async function confirm(kind) {
+    resultSelector=kind==='switch'?'#boxed-lllllabc-transfer-result':'#boxed-lllllabc-clear-result';
     const state=await refresh();
     if (state.journal) return failure(new Error('请先恢复未完成的存储操作。'));
-    if (isGenerating()) { text('#boxed-lllllabc-transfer-result','请先停止生成，再切换或清空存储。'); return; }
+    if (isGenerating()) { text(resultSelector,'请先停止生成，再切换或清空存储。'); return; }
     const to=kind==='switch' ? (state.active==='indexeddb'?'sqlite':'indexeddb') : state.previous;
     if (!to) return;
     const node=frame(kind==='switch'?'切换存储方式':'清空旧端数据');
@@ -67,7 +77,7 @@ export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerati
       submit.disabled=true; cancel.disabled=true;
       try {
         const result=kind==='switch' ? await coordinator.switchTo(to,{confirmed:true}) : await coordinator.clearInactive(to,{confirmed:true});
-        text('#boxed-lllllabc-transfer-result',kind==='switch' ? `切换成功，当前使用 ${names[result.active]}。原来源副本已保留。` : `${names[to]} 旧端数据已清空并校验。`);
+        text(resultSelector,kind==='switch' ? `切换成功，当前使用 ${names[result.active]}。原来源副本已保留。` : `${names[to]} 旧端数据已清空并校验。`);
         await refresh(); await afterChange();
       } catch(error) { await failure(error); }
     });
@@ -76,7 +86,7 @@ export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerati
   function bind() {
     document.querySelector('#boxed-lllllabc-switch-storage')?.addEventListener('click',()=>confirm('switch').catch(failure));
     document.querySelector('#boxed-lllllabc-clear-inactive')?.addEventListener('click',()=>confirm('clear').catch(failure));
-    document.querySelector('#boxed-lllllabc-check-storage')?.addEventListener('click',()=>refresh().catch(failure));
+    document.querySelector('#boxed-lllllabc-check-storage')?.addEventListener('click',()=>{ resultSelector='#boxed-lllllabc-transfer-result'; refresh().then(afterChange).catch(failure); });
   }
   return { bind, refresh, block, close, failure, progress(message) { if (progressText) progressText.textContent=message; } };
 }

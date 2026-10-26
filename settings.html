@@ -44,6 +44,32 @@
           </div>
         </section>
 
+        <section class="boxed-lllllabc-settings-group" data-settings-group="storage" aria-labelledby="boxed-lllllabc-group-storage">
+          <h4 id="boxed-lllllabc-group-storage">存储方式与状态</h4>
+          <p>当前活动端：<span id="boxed-lllllabc-storage-mode">正在读取</span></p>
+          <p class="boxed-lllllabc-settings-help">后端可选；安装或检查连接不会切换存储方式，也不会迁移。</p>
+          <p id="boxed-lllllabc-sqlite-state" role="status">正在检查可选后端</p>
+          <button id="boxed-lllllabc-check-storage" class="menu_button boxed-lllllabc-action-button" type="button">检查 SQLite 连接</button>
+          <button id="boxed-lllllabc-switch-storage" class="menu_button boxed-lllllabc-action-button" type="button" disabled>切换存储方式</button>
+          <p id="boxed-lllllabc-transfer-result" role="status"></p>
+        <div class="boxed-lllllabc-storage-overview" aria-labelledby="boxed-lllllabc-storage-title">
+          <div class="boxed-lllllabc-storage-heading">
+            <strong id="boxed-lllllabc-storage-title">IndexedDB 存储状态</strong>
+            <span id="boxed-lllllabc-storage-state" data-tone="unavailable" role="status">正在读取</span>
+          </div>
+          <p id="boxed-lllllabc-storage-help" class="boxed-lllllabc-storage-help">备份只保存在当前酒馆地址；各项统计方式不同，数值可能不完全对应。</p>
+          <dl class="boxed-lllllabc-storage-metrics">
+            <div><dt>备份内容大小（估算）</dt><dd id="boxed-lllllabc-storage-extension">正在计算</dd></div>
+            <div><dt id="boxed-lllllabc-storage-site-label">当前酒馆已使用</dt><dd id="boxed-lllllabc-storage-site">正在读取</dd></div>
+            <div><dt id="boxed-lllllabc-storage-remaining-label">当前酒馆还可使用</dt><dd id="boxed-lllllabc-storage-remaining">正在读取</dd></div>
+          </dl>
+          <p id="boxed-lllllabc-storage-issue" class="boxed-lllllabc-storage-issue" hidden></p>
+        </div>
+
+        </section>
+
+        <section class="boxed-lllllabc-settings-group" data-settings-group="backup" aria-labelledby="boxed-lllllabc-group-backup">
+          <h4 id="boxed-lllllabc-group-backup">备份开关</h4>
         <label class="boxed-lllllabc-row">
           <span>
             <strong>启用本地备份</strong>
@@ -76,6 +102,10 @@
           <input id="boxed-lllllabc-historical-enabled" type="checkbox" />
         </label>
 
+        </section>
+
+        <section class="boxed-lllllabc-settings-group" data-settings-group="display" aria-labelledby="boxed-lllllabc-group-display">
+          <h4 id="boxed-lllllabc-group-display">参数与显示</h4>
         <label class="boxed-lllllabc-row">
           <span>
             <strong>最近备份层数</strong>
@@ -111,34 +141,17 @@
           </span>
         </label>
 
-        <section class="boxed-lllllabc-storage-mode" aria-label="存储方式与状态">
-          <strong>存储方式与状态</strong>
-          <p>当前活动端：<span id="boxed-lllllabc-storage-mode">正在读取</span></p>
-          <p id="boxed-lllllabc-sqlite-state">正在检查可选后端</p>
-          <button id="boxed-lllllabc-check-storage" class="menu_button" type="button">检查连接</button>
-          <button id="boxed-lllllabc-switch-storage" class="menu_button" type="button" disabled>切换存储方式</button>
-          <button id="boxed-lllllabc-clear-inactive" class="menu_button" type="button" disabled>清空旧端数据</button>
-          <p id="boxed-lllllabc-transfer-result" role="status"></p>
-        </section>
-        <section class="boxed-lllllabc-storage-overview" aria-labelledby="boxed-lllllabc-storage-title">
-          <div class="boxed-lllllabc-storage-heading">
-            <strong id="boxed-lllllabc-storage-title">本地存储</strong>
-            <span id="boxed-lllllabc-storage-state" data-tone="unavailable">正在读取</span>
-          </div>
-          <p id="boxed-lllllabc-storage-help" class="boxed-lllllabc-storage-help">备份只保存在当前酒馆地址；各项统计方式不同，数值可能不完全对应。</p>
-          <dl class="boxed-lllllabc-storage-metrics">
-            <div><dt>备份内容大小（估算）</dt><dd id="boxed-lllllabc-storage-extension">正在计算</dd></div>
-            <div><dt id="boxed-lllllabc-storage-site-label">当前酒馆已使用</dt><dd id="boxed-lllllabc-storage-site">正在读取</dd></div>
-            <div><dt id="boxed-lllllabc-storage-remaining-label">当前酒馆还可使用</dt><dd id="boxed-lllllabc-storage-remaining">正在读取</dd></div>
-          </dl>
-          <p id="boxed-lllllabc-storage-issue" class="boxed-lllllabc-storage-issue" hidden></p>
         </section>
 
-        <section aria-label="聊天快照">
-          <strong>聊天快照</strong>
+        <section class="boxed-lllllabc-settings-group" data-settings-group="snapshots" aria-labelledby="boxed-lllllabc-group-snapshots">
+          <h4 id="boxed-lllllabc-group-snapshots">聊天快照</h4>
           <p>手动保存完整聊天，存档内容独立保留。</p>
           <button id="boxed-lllllabc-manage-snapshots" class="menu_button boxed-lllllabc-action-button" type="button">管理聊天快照</button>
         </section>
+
+        <section class="boxed-lllllabc-settings-group" data-settings-group="management" aria-labelledby="boxed-lllllabc-group-management">
+          <h4 id="boxed-lllllabc-group-management">备份管理</h4>
+          <p class="boxed-lllllabc-settings-help">“立即核对后端”检查酒馆原生聊天是否保存，与 SQLite 连接检查不同。</p>
         <div class="boxed-lllllabc-actions">
           <button id="boxed-lllllabc-refresh" class="menu_button boxed-lllllabc-action-button" type="button">
             <i class="fa-solid fa-rotate" aria-hidden="true"></i>
@@ -158,6 +171,16 @@
           <div class="boxed-lllllabc-panel-title">当前聊天备份</div>
           <div id="boxed-lllllabc-settings-panel-body" class="boxed-lllllabc-panel-body">暂无数据。</div>
         </div>
+        </section>
+
+        <section class="boxed-lllllabc-settings-group" data-settings-group="inactive" aria-labelledby="boxed-lllllabc-group-inactive">
+          <h4 id="boxed-lllllabc-group-inactive">旧端数据管理</h4>
+          <p id="boxed-lllllabc-clear-help" class="boxed-lllllabc-settings-help">完成存储切换后，才可清空保留的旧端数据。</p>
+          <button id="boxed-lllllabc-clear-inactive" class="menu_button boxed-lllllabc-action-button" type="button" aria-describedby="boxed-lllllabc-clear-help" disabled>清空旧端数据</button>
+          <p id="boxed-lllllabc-clear-result" role="status"></p>
+        </section>
+
+
       </div>
     </div>
   </div>

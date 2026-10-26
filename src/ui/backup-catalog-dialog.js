@@ -1,11 +1,13 @@
 import { formatStorageSize, groupCatalogChats } from "../backup/catalog.js";
 import { renderBatchCleanupSection, closeBatchCleanupDialog } from "./batch-cleanup.js";
+import { trackCatalogViewport } from "./catalog-viewport.js";
 
 const CATALOG_DIALOG_ID = "boxed-lllllabc-catalog-dialog";
 let latestCatalog = null;
 let currentQuery = "";
 let openCleanupHandler = null;
 let batchHandlers = {};
+let releaseViewport = () => {};
 const collapsedOwnerKeys = new Set();
 
 export function openBackupCatalogDialog({ onRefresh, onOpenCleanup, onPreviewBatch, onExecuteBatch } = {}) {
@@ -74,9 +76,20 @@ export function openBackupCatalogDialog({ onRefresh, onOpenCleanup, onPreviewBat
   frame.append(header, body, mobileFooter);
   dialog.append(backdrop, frame);
   dialog.addEventListener("keydown", (event) => {
+    event.stopPropagation();
     if (event.key === "Escape") closeBackupCatalogDialog();
+    if (event.key === "Tab") {
+      const controls = [...dialog.querySelectorAll("button:not(:disabled),input:not(:disabled),select:not(:disabled),summary")]
+        .filter(node => node.getClientRects().length && node.checkVisibility?.() !== false);
+      const first = controls[0], last = controls.at(-1);
+      if (event.shiftKey && document.activeElement === first || !event.shiftKey && document.activeElement === last) {
+        event.preventDefault(); (event.shiftKey ? last : first)?.focus();
+      }
+    }
   });
+  dialog.addEventListener("keyup", event => event.stopPropagation());
   document.body.append(dialog);
+  releaseViewport = trackCatalogViewport(dialog);
   try {
     close.focus({ preventScroll: true });
   } catch {
@@ -90,7 +103,9 @@ export function renderBackupCatalogDialog({ catalog = null, loading = false, err
   const body = document.querySelector(`#${CATALOG_DIALOG_ID} .boxed-lllllabc-catalog-body`);
   if (!body) return;
   if (catalog) latestCatalog = catalog;
+  const containedFocus = body.contains(document.activeElement);
   body.replaceChildren();
+  if (containedFocus) body.closest(`#${CATALOG_DIALOG_ID}`).querySelector(".boxed-lllllabc-dialog-close")?.focus({ preventScroll: true });
 
   if (loading) {
     body.append(renderState("fa-box-archive", "正在整理备份索引…", "会读取当前活动存储，不会访问或修改聊天文件。"));
@@ -190,6 +205,7 @@ function renderCatalogGroup(group, forceOpen = false) {
 }
 
 export function closeBackupCatalogDialog() {
+  releaseViewport(); releaseViewport = () => {};
   closeBatchCleanupDialog();
   document.getElementById(CATALOG_DIALOG_ID)?.remove();
 }

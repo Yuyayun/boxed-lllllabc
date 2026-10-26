@@ -3,40 +3,54 @@ import { formatStorageSize } from "../backup/catalog.js";
 const WARNING_DIALOG_ID = "boxed-lllllabc-storage-warning-dialog";
 
 export function renderSettingsStorage(snapshot = {}) {
-  const sqlite = snapshot.mode === "sqlite";
-  setText("#boxed-lllllabc-storage-site-label", sqlite ? "SQLite 数据库文件占用" : "当前酒馆已使用");
-  setText("#boxed-lllllabc-storage-remaining-label", sqlite ? "服务器剩余空间" : "当前酒馆还可使用");
-  setText("#boxed-lllllabc-storage-help", sqlite ? "当前统计来自 SQLite；文件占用包含日志文件，服务器剩余空间暂不估算。" : "备份只保存在当前酒馆地址；各项统计方式不同，数值可能不完全对应。");
-  setText("#boxed-lllllabc-storage-extension", formatStorageSize(snapshot.extensionBytes));
-  setText(
-    "#boxed-lllllabc-storage-site",
-    sqlite ? formatStorageSize(snapshot.databaseBytes) : snapshot.estimate?.supported ? formatStorageSize(snapshot.estimate.usage) : "浏览器未提供",
-  );
-  setText(
-    "#boxed-lllllabc-storage-remaining",
-    snapshot.estimate?.supported ? `约 ${formatStorageSize(snapshot.estimate.remaining)}` : "无法估算",
-  );
+  const presentation = createSettingsStoragePresentation(snapshot);
+  setText("#boxed-lllllabc-storage-title", presentation.title);
+  setText("#boxed-lllllabc-storage-site-label", presentation.siteLabel);
+  setText("#boxed-lllllabc-storage-remaining-label", presentation.remainingLabel);
+  setText("#boxed-lllllabc-storage-help", presentation.help);
+  setText("#boxed-lllllabc-storage-extension", presentation.extensionText);
+  setText("#boxed-lllllabc-storage-site", presentation.siteText);
+  setText("#boxed-lllllabc-storage-remaining", presentation.remainingText);
 
   const state = document.querySelector("#boxed-lllllabc-storage-state");
   if (state) {
     state.dataset.tone = snapshot.pressure || "unavailable";
-    state.textContent = storageStateText(snapshot);
+    state.textContent = presentation.stateText;
   }
   const issue = document.querySelector("#boxed-lllllabc-storage-issue");
   if (issue) {
-    const messages = [];
-    if (snapshot.invalidRecordCount) {
-      messages.push(`已隔离 ${snapshot.invalidRecordCount} 条异常本地记录，没有自动删除。`);
-    }
-    if (snapshot.failure?.detail) messages.push(snapshot.failure.detail);
-    issue.textContent = messages.join(" ");
-    issue.hidden = messages.length === 0;
+    issue.textContent = presentation.issue;
+    issue.hidden = !presentation.issue;
   }
+}
+
+export function createSettingsStoragePresentation(snapshot = {}) {
+  const sqlite = snapshot.mode === "sqlite";
+  const bytes = (value, missing) => Number.isFinite(value) && value >= 0 ? formatStorageSize(value) : missing;
+  const unavailable = snapshot.loading ? "正在读取" : snapshot.failure ? "当前不可读取" : sqlite ? "服务器未提供" : "浏览器未提供";
+  const messages = [];
+  if (snapshot.invalidRecordCount) messages.push(`已隔离 ${snapshot.invalidRecordCount} 条异常备份记录，没有自动删除。`);
+  if (snapshot.failure?.detail) messages.push(snapshot.failure.detail);
+  return {
+    title: sqlite ? "SQLite 存储状态" : "IndexedDB 存储状态",
+    siteLabel: sqlite ? "SQLite 文件占用（含日志）" : "当前酒馆来源已使用",
+    remainingLabel: sqlite ? "服务器磁盘可用" : "当前酒馆来源可用（估算）",
+    help: sqlite ? "统计来自服务器 SQLite。磁盘可用是所在文件系统的空间，不是 SQLite 配额；文件大小与记录内容大小不同。"
+      : "内容为普通备份与已完成快照的估算；浏览器用量和可用空间属于整个酒馆来源，不能视为箱装独占空间。",
+    extensionText: snapshot.failure ? unavailable : bytes(snapshot.extensionBytes, unavailable),
+    siteText: snapshot.failure ? unavailable : sqlite ? bytes(snapshot.databaseBytes, unavailable)
+      : snapshot.estimate?.supported ? bytes(snapshot.estimate.usage, unavailable) : unavailable,
+    remainingText: snapshot.failure ? unavailable : sqlite ? bytes(snapshot.availableBytes, unavailable)
+      : snapshot.estimate?.supported && Number.isFinite(snapshot.estimate.remaining) ? `约 ${formatStorageSize(snapshot.estimate.remaining)}` : unavailable,
+    stateText: storageStateText(snapshot), issue: messages.join(" "),
+  };
 }
 
 export function createCurrentChatStorageText(snapshot = {}, currentChatBytes = 0) {
   const parts = [`当前聊天约 ${formatStorageSize(currentChatBytes)}`];
-  if (snapshot.estimate?.supported) {
+  if (snapshot.mode === "sqlite") {
+    parts.push(!snapshot.failure && Number.isFinite(snapshot.availableBytes) && snapshot.availableBytes >= 0 ? `服务器磁盘可用 ${formatStorageSize(snapshot.availableBytes)}` : "服务器可用空间未提供");
+  } else if (snapshot.estimate?.supported) {
     parts.push(`预计还可使用 ${formatStorageSize(snapshot.estimate.remaining)}`);
   } else {
     parts.push("暂时无法估算剩余空间");
@@ -97,12 +111,16 @@ export function openStorageWarningDialog({ snapshot = {}, onManage } = {}) {
 }
 
 function storageStateText(snapshot) {
+  if (snapshot.loading) return `正在读取 ${snapshot.mode === "sqlite" ? "SQLite" : "IndexedDB"}`;
   if (snapshot.failure) return snapshot.failure.shortText;
-  if (snapshot.mode === "sqlite") return "SQLite 已连接";
-  if (snapshot.pressure === "critical") return "空间非常紧张";
-  if (snapshot.pressure === "warning") return "建议留意空间";
-  if (snapshot.pressure === "normal") return "空间充足";
-  return "无法估算配额";
+  if (snapshot.mode === "sqlite") return snapshot.readable === true && snapshot.writable === true ? "SQLite 可读取、可写入"
+    : snapshot.readable === true && snapshot.writable === false ? "SQLite 可读取 · 不可写入" : "SQLite 读写状态未确认";
+  if (snapshot.checkedAt) {
+    if (snapshot.pressure === "critical") return "IndexedDB 可读取 · 空间非常紧张";
+    if (snapshot.pressure === "warning") return "IndexedDB 可读取 · 建议留意空间";
+    return snapshot.pressure === "normal" ? "IndexedDB 可读取 · 空间充足" : "IndexedDB 可读取 · 配额未提供";
+  }
+  return "正在读取";
 }
 
 function pressureMessage(snapshot) {

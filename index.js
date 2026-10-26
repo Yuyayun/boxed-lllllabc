@@ -310,6 +310,7 @@ jQuery(async () => {
     runBackupNow,
     getPanelController: () => panelController,
     getCatalogController: () => catalogController,
+    refreshStorageOverview: () => storageController?.refresh(),
   });
   await settingsController.load();
   settingsController.sync();
