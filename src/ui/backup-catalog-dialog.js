@@ -1,16 +1,19 @@
 import { formatStorageSize, groupCatalogChats } from "../backup/catalog.js";
+import { renderBatchCleanupSection, closeBatchCleanupDialog } from "./batch-cleanup.js";
 
 const CATALOG_DIALOG_ID = "boxed-lllllabc-catalog-dialog";
 let latestCatalog = null;
 let currentQuery = "";
 let openCleanupHandler = null;
+let batchHandlers = {};
 const collapsedOwnerKeys = new Set();
 
-export function openBackupCatalogDialog({ onRefresh, onOpenCleanup } = {}) {
+export function openBackupCatalogDialog({ onRefresh, onOpenCleanup, onPreviewBatch, onExecuteBatch } = {}) {
   closeBackupCatalogDialog();
   latestCatalog = null;
   currentQuery = "";
   openCleanupHandler = onOpenCleanup;
+  batchHandlers = { onPreview: onPreviewBatch, onExecute: onExecuteBatch };
 
   const dialog = document.createElement("div");
   dialog.id = CATALOG_DIALOG_ID;
@@ -90,7 +93,7 @@ export function renderBackupCatalogDialog({ catalog = null, loading = false, err
   body.replaceChildren();
 
   if (loading) {
-    body.append(renderState("fa-box-archive", "正在整理本地备份索引…", "会读取浏览器本地数据库，不会访问或修改聊天。"));
+    body.append(renderState("fa-box-archive", "正在整理备份索引…", "会读取当前活动存储，不会访问或修改聊天文件。"));
     return;
   }
   if (error) {
@@ -136,7 +139,9 @@ export function renderBackupCatalogDialog({ catalog = null, loading = false, err
   };
   input.addEventListener("input", renderResults);
   renderResults();
-  body.append(search, result);
+  body.append(search);
+  if (typeof batchHandlers.onPreview === "function") body.append(renderBatchCleanupSection({ catalog: latestCatalog, ...batchHandlers }));
+  body.append(result);
 }
 
 function renderCatalogGroup(group, forceOpen = false) {
@@ -185,6 +190,7 @@ function renderCatalogGroup(group, forceOpen = false) {
 }
 
 export function closeBackupCatalogDialog() {
+  closeBatchCleanupDialog();
   document.getElementById(CATALOG_DIALOG_ID)?.remove();
 }
 

@@ -31,6 +31,7 @@ const OPERATIONS = Object.freeze({
   reconcileChatIdentity: database.reconcileChatIdentity,
   migrateRenamedChatIdentity: database.migrateRenamedChatIdentity,
   deleteBackupTypeForChat: database.deleteBackupTypeForChat,
+  deleteBackupBatch: database.deleteBackupBatch,
   resolveFrozenFullBackup: database.resolveFrozenFullBackup,
 });
 

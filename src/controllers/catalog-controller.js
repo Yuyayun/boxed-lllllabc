@@ -1,5 +1,6 @@
 import { buildBackupCatalog } from "../backup/catalog.js";
 import { createBackupCleanupPlans, validateBackupCleanupPlan } from "../backup/cleanup.js";
+import { createBatchCleanupPlan } from "../backup/batch-cleanup.js";
 import { defaultBackupStorage } from "../storage/service.js";
 import {
   openBackupCatalogDialog,
@@ -37,7 +38,8 @@ export function createCatalogController({
   }
 
   async function openCatalog() {
-    openDialog({ onRefresh: refreshCatalog, onOpenCleanup: openCleanup });
+    openDialog({ onRefresh: refreshCatalog, onOpenCleanup: openCleanup,
+      onPreviewBatch: previewBatch, onExecuteBatch: executeBatch });
     await waitForDialogPaint();
     return refreshCatalog();
   }
@@ -89,8 +91,50 @@ export function createCatalogController({
     return result;
   }
 
+  async function previewBatch(selection) {
+    return runGuard(async () => {
+      let session;
+      try {
+        session = await storage.open();
+        return createBatchCleanupPlan({ catalog: buildCatalog(await session.getBackupCatalogData()),
+          selection, mode: storage.getMode() });
+      } finally { session?.close?.(); }
+    });
+  }
+
+  async function executeBatch(plan, { confirmed = false } = {}) {
+    let submitted = false, mode;
+    try {
+      const result = await runGuard(async () => {
+        let session;
+        try {
+          if (confirmed !== true) throw new Error("批量清理必须先预览并明确确认。");
+          session = await storage.open();
+          mode = storage.getMode();
+          if (mode !== plan?.mode) throw Object.assign(new Error("活动存储已变化，请重新预览。"), { code: "stale-cleanup-plan" });
+          submitted = true;
+          // The port rechecks the whole scope inside the deletion transaction.
+          return await session.deleteBackupBatch({ plan, confirmed: true });
+        } finally { session?.close?.(); }
+      });
+      // A committed deletion remains successful even if a subsequent UI refresh fails.
+      const refreshes = await Promise.allSettled([refreshCatalog, refreshVisiblePanel, onCatalogChanged]
+        .map(refresh => Promise.resolve().then(refresh)));
+      return { ...result, refreshWarning: refreshes.some(item => item.status === "rejected"
+        || item.value?.ok === false) ? "删除已提交，但部分显示刷新失败，请手动刷新。" : "" };
+    } catch (error) {
+      const unknown = submitted && mode === "sqlite" && (!error.code || error.code === "outcome-unknown");
+      return { ok: false, committed: unknown ? null : false, unknown, stale: error.code === "stale-cleanup-plan",
+        succeeded: unknown ? null : 0, skipped: 0, failed: unknown ? null : plan?.actions?.length ?? 0,
+        reason: unknown ? "服务器执行结果未确认。请刷新并核对备份后重新预览，不要直接重试旧计划。"
+          : error instanceof Error ? error.message : String(error), items: [] };
+    }
+  }
+
   return {
     executeCleanup: finishCleanup,
+    previewBatch,
+    executeBatch,
     openCatalog,
     openCleanup,
     refreshCatalog,

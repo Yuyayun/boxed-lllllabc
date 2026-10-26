@@ -65,7 +65,7 @@ function renderCleanupChooser(body, plans, onPreview) {
   icon.setAttribute("aria-hidden", "true");
   const copy = document.createElement("div");
   const title = document.createElement("strong");
-  title.textContent = "只清理扩展的浏览器本地数据";
+  title.textContent = "只清理扩展当前活动存储的数据";
   const detail = document.createElement("span");
   detail.textContent = "不会删除或修改 SillyTavern 聊天文件。每次只能清理一种备份，确认前会再次校验数据。";
   copy.append(title, detail);

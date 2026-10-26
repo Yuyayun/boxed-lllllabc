@@ -147,6 +147,7 @@ function finishEntry(entry) {
     displayName: visibleChatName(meta),
     ownerName: String(meta.groupName || meta.characterName || "").trim(),
     ownerKey: owner.key,
+    cleanupMetaFingerprint: fingerprintBackupRecords(entry.meta ? [entry.meta] : []),
     ownerTypeLabel: owner.typeLabel,
     typeLabel: meta.chatType === "group" ? "群聊" : meta.chatType === "character" ? "角色聊天" : "聊天",
     lastUpdatedAt: entry.lastUpdatedAt,

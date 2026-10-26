@@ -39,6 +39,7 @@ export const {
   reconcileChatIdentity,
   migrateRenamedChatIdentity,
   deleteBackupTypeForChat,
+  deleteBackupBatch,
   resolveFrozenFullBackup,
   putPendingChanges,
   replacePendingChanges,
