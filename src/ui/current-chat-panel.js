@@ -18,6 +18,7 @@ export function renderCurrentChatPanel(container, {
   frozenResolution = {},
   management = {},
   onVerify,
+  onCreateSnapshot,
 }) {
   const recentExpanded = container.dataset.recentExpanded === "true";
   container.replaceChildren();
@@ -34,7 +35,7 @@ export function renderCurrentChatPanel(container, {
   }
 
   container.append(summary);
-  container.append(renderPrimaryActions({ restore, onVerify }));
+  container.append(renderPrimaryActions({ restore, onVerify, onCreateSnapshot }));
   container.append(renderRecentSection(messages, settings, {
     expanded: recentExpanded,
     onToggle(expanded) {

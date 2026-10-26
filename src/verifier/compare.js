@@ -13,6 +13,8 @@ export function comparePendingWithBackend(pendingRecords, backendChat) {
   const remaining = [];
 
   for (const record of pendingRecords ?? []) {
+    // Snapshot restores additionally require the asynchronous metadata proof.
+    if (record.snapshotSaveProof) { remaining.push(record); continue; }
     if (!Number.isInteger(record.messageIndex)) {
       const isLegacyRecord = record.hashVersion !== CANONICAL_HASH_VERSION;
       if (isLegacyRecord || hashCanonicalChat(backendMessages) === record.canonicalChatHash) {

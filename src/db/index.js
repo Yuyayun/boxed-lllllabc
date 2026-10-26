@@ -1,6 +1,8 @@
 import { migrateDatabase } from "./migration.js";
-import { DB_NAME, DB_VERSION, TRANSFER_STORES } from "./schema.js";
+import { DB_NAME, DB_VERSION, TRANSFER_STORES, STORES } from "./schema.js";
 import { createBackupOperations } from "../storage/operations.js";
+import { createSnapshotOperations } from "../storage/snapshot-operations.js";
+import { encodeStorageValue } from "../storage/protocol.js";
 
 export function openBackupDatabase() {
   if (!globalThis.indexedDB) {
@@ -47,11 +49,38 @@ export const {
   updateChatMetaSummary,
 } = createBackupOperations({ runTransaction, requestToPromise });
 
+export const { beginSnapshot, appendSnapshotMessages, publishSnapshot, getSnapshotHeader, getSnapshotMessages, listSnapshots, renameSnapshot, deleteSnapshot } = createSnapshotOperations({ runTransaction, requestToPromise });
+
+function snapshotDriver(store) {
+  return {
+    get: store.get.bind(store), put: store.put.bind(store), delete: store.delete.bind(store), index: store.index.bind(store),
+    page({ snapshotId, after, limit = 50 }) {
+      return new Promise((resolve, reject) => {
+        const query = snapshotId ? IDBKeyRange.bound([snapshotId, after], [snapshotId, Infinity], true) : IDBKeyRange.lowerBound(after, true);
+        const read = store.openCursor(query), rows = []; let bytes = 0;
+        read.onerror = () => reject(read.error);
+        read.onsuccess = () => {
+          try {
+            const cursor = read.result;
+            if (!cursor) return resolve(rows);
+            const size = new TextEncoder().encode(JSON.stringify(encodeStorageValue(cursor.value))).byteLength;
+            if (rows.length && (rows.length >= limit || bytes + size > 2 * 1024 * 1024)) return resolve(rows);
+            rows.push(cursor.value); bytes += size; cursor.continue();
+          } catch (error) { reject(error); }
+        };
+      });
+    },
+  };
+}
+
 function runTransaction(db, storeNames, mode, callback) {
   return new Promise((resolve, reject) => {
     const guarded = db.objectStoreNames?.contains(TRANSFER_STORES.meta);
     const transaction = db.transaction(guarded ? [...storeNames, TRANSFER_STORES.meta] : storeNames, mode);
-    const stores = new Map(storeNames.map((name) => [name, transaction.objectStore(name)]));
+    const stores = new Map(storeNames.map((name) => {
+      const store = transaction.objectStore(name);
+      return [name, name === STORES.snapshots || name === STORES.snapshotMessages ? snapshotDriver(store) : store];
+    }));
     let callbackResult;
 
     transaction.oncomplete = () => resolve(callbackResult);

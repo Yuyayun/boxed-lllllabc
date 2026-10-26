@@ -1,0 +1,21 @@
+.boxed-lllllabc-snapshot-dialog {
+  box-sizing: border-box;
+  width: min(46rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  padding: 1.25rem;
+  color: var(--SmartThemeBodyColor, #ddd);
+  background: var(--SmartThemeBlurTintColor, #222);
+  border: 1px solid var(--SmartThemeBorderColor, #777);
+  border-radius: 0.75rem;
+  font: inherit;
+}
+.boxed-lllllabc-snapshot-dialog::backdrop { background: rgb(0 0 0 / 65%); }
+.boxed-lllllabc-snapshot-dialog label { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-block: 1rem; }
+.boxed-lllllabc-snapshot-dialog input[type="text"] { width: 100%; min-width: 0; }
+.boxed-lllllabc-snapshot-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.boxed-lllllabc-snapshot-dialog footer,
+.boxed-lllllabc-snapshot-controls { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 1rem; }
+.boxed-lllllabc-snapshot-list article { padding-block: 1rem; border-bottom: 1px solid var(--SmartThemeBorderColor, #777); }
+.boxed-lllllabc-snapshot-dialog details { margin-block: 0.75rem; }

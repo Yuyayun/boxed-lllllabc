@@ -19,6 +19,7 @@ import {
 export function createPanelController({
   storage = defaultBackupStorage,
   runGuard = (operation) => operation(),
+  onCreateSnapshot,
   getContextReader,
   getSettings,
   getLatestStatus,
@@ -174,6 +175,7 @@ export function createPanelController({
           fullMessages,
         });
         renderCurrentChatPanel(panelBody, {
+          onCreateSnapshot,
           status: getLatestStatus(),
           meta: panelMeta,
           messages,

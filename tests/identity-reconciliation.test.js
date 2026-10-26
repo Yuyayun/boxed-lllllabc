@@ -150,7 +150,7 @@ test("明确 CHAT_RENAMED 路径在同一事务中迁移四类记录和元数据
   assert.equal(result.status, "migrate");
   assert.equal(result.reason, "explicit-rename");
   assert.equal(state.mode, "readwrite");
-  assert.deepEqual(new Set(state.storeNames), new Set(Object.values(STORES)));
+  assert.deepEqual(new Set(state.storeNames), new Set(Object.values(STORES).filter(name => name !== STORES.snapshotMessages)));
   assert.equal(state.chatMeta.length, 1);
   assert.equal(state.chatMeta[0].chatKey, rename.identity.chatKey);
   assert.equal(state.chatMeta[0].chatId, "新名字");
@@ -347,6 +347,7 @@ function createIdentityDatabase(initial) {
     pendingChanges: structuredClone(initial.pendingChanges ?? []),
     fullMessages: structuredClone(initial.fullMessages ?? []),
     historicalChanges: structuredClone(initial.historicalChanges ?? []),
+    snapshots: structuredClone(initial.snapshots ?? []),
     storeNames: [],
     mode: "",
   };
@@ -356,17 +357,19 @@ function createIdentityDatabase(initial) {
     [STORES.pendingChanges]: "pendingChanges",
     [STORES.fullMessages]: "fullMessages",
     [STORES.historicalChanges]: "historicalChanges",
+    [STORES.snapshots]: "snapshots",
   };
 
   const stores = new Map(Object.entries(stateNames).map(([storeName, stateName]) => {
     const isMeta = storeName === STORES.chatMeta;
-    const isPending = storeName === STORES.pendingChanges;
+    const isPending = storeName === STORES.pendingChanges || storeName === STORES.snapshots;
     const primaryKey = (record) => isMeta
       ? record.chatKey
       : isPending
         ? record.id
         : JSON.stringify([record.chatKey, record.messageIndex]);
     const store = {
+      get(key) { return request(structuredClone(state[stateName].find(record => primaryKey(record) === key))); },
       getAll() {
         return request(structuredClone(state[stateName]));
       },

@@ -42,7 +42,7 @@ export function renderBackupManagement({ onOpen, disabledReason = "", storageTex
   return section;
 }
 
-export function renderPrimaryActions({ restore = {}, onVerify }) {
+export function renderPrimaryActions({ restore = {}, onVerify, onCreateSnapshot }) {
   const section = document.createElement("section");
   section.className = "boxed-lllllabc-primary-actions";
   const title = document.createElement("div");
@@ -56,6 +56,10 @@ export function renderPrimaryActions({ restore = {}, onVerify }) {
   const actions = document.createElement("div");
   actions.className = "boxed-lllllabc-primary-action-grid";
   actions.append(
+    createPrimaryAction({
+      icon: "fa-camera", label: "创建聊天快照", description: "手动保存此刻完整聊天，不随普通备份变化",
+      onClick: onCreateSnapshot, disabledReason: "需要先打开可识别的聊天。",
+    }),
     createPrimaryAction({
       icon: "fa-floppy-disk",
       label: "请求保存",

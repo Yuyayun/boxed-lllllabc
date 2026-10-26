@@ -2,6 +2,7 @@ import { defaultBackupStorage } from "../storage/service.js";
 import { hashCanonicalChat, stripChatHeader } from "../backup/canonicalize.js";
 import { readBackendChat } from "../verifier/backend-reader.js";
 import { comparePendingWithBackend } from "../verifier/compare.js";
+import { confirmSnapshotPending } from "../snapshots/confirmation.js";
 
 export function createBackendVerifier({
   storage = defaultBackupStorage,
@@ -191,11 +192,14 @@ export function createBackendVerifier({
       }
       const backendMatchesCurrent = needsFullConfirmation
         && hashCanonicalChat(stripChatHeader(backend.chat)) === hashCanonicalChat(latestCurrent.chat);
+      const snapshotConfirmed = await confirmSnapshotPending(pending, backend.chat, getContextReader().readCurrentChat());
+      if (!isCurrentRun(runId)) return latestStatus();
       const comparison = comparePendingWithBackend(pending, backend.chat);
       const confirmedIds = new Set(backendMatchesCurrent
         ? pending.map((record) => record?.id).filter(Boolean)
         : comparison.confirmedIds);
-      const confirmedRecords = pending.filter((record) => confirmedIds.has(record?.id));
+      for (const id of snapshotConfirmed) confirmedIds.add(id);
+      const confirmedRecords = pending.filter((record) => confirmedIds.has(record?.id) && (!record.snapshotSaveProof || snapshotConfirmed.has(record.id)));
       if (confirmedRecords.length) {
         const deletion = await enqueueEffect(
           runId,

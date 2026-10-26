@@ -413,6 +413,7 @@ function hashPendingRecords(records, scopeIndexes) {
       canonicalChatHash: record?.canonicalChatHash ?? "",
       kind: record?.kind ?? "",
       updatedAt: record?.updatedAt ?? "",
+      ...(record?.snapshotSaveProof ? { snapshotSaveProof: record.snapshotSaveProof } : {}),
     }));
   return hashString(stableStringify(comparable));
 }

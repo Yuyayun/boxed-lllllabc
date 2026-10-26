@@ -23,6 +23,8 @@ import { createManagedStorage, createOperationGate } from "./src/storage/managed
 import { createTransferCoordinator } from "./src/storage/transfer.js";
 import { sha256 } from "./src/storage/transfer-format.js";
 import { createStorageSwitchUi } from "./src/ui/storage-switch.js";
+import { createSnapshotController } from "./src/controllers/snapshot-controller.js";
+import { createSnapshotUi } from "./src/ui/snapshots.js";
 import { ensureStatusLine, updateStatusLine } from "./src/ui/status-line.js";
 import {
   bindUpdateAction,
@@ -40,6 +42,8 @@ const adapters = { indexeddb: createIndexedDbStorage(), sqlite: createSqliteStor
 const backupStorage = createManagedStorage({ control: storageControl, adapters });
 const operationGate = createOperationGate();
 let switchUi;
+let snapshotController;
+let snapshotUi;
 let migrationContext;
 function isGenerating() {
   if (typeof Tavern.isGenerating === "function") return Tavern.isGenerating();
@@ -158,6 +162,7 @@ function initializeControllers() {
   });
 
   panelController = createPanelController({
+    onCreateSnapshot: () => snapshotUi?.create(),
     runGuard: operationGate.run,
     storage: backupStorage,
     getContextReader,
@@ -180,6 +185,17 @@ function initializeControllers() {
     storage: backupStorage,
     refreshVisiblePanel,
     onCatalogChanged: () => storageController?.refresh(),
+  });
+
+  snapshotController = createSnapshotController({
+    storage: backupStorage, getContextReader, runGuard: operationGate.run, isGenerating,
+    beforeRestore: async () => {
+      await backupEvents?.pause(); backendVerifier?.clearScheduledVerification(); await backendVerifier?.whenIdle();
+    },
+    afterRestore: async () => {
+      backupEvents?.resume();
+      await runBackupNow({ eventName: "snapshot-restored", args: [], verifyNow: true });
+    },
   });
 
   storageController = createStorageController({
@@ -298,6 +314,8 @@ jQuery(async () => {
   await settingsController.load();
   settingsController.sync();
   settingsController.bind();
+  snapshotUi = createSnapshotUi({ controller: snapshotController, onChanged: async () => { await panelController?.refreshVisiblePanel(); await storageController?.refresh(); } });
+  snapshotUi.bind();
   await loadAndRenderExtensionInfo({ manifestUrl: `${extensionFolderPath}/manifest.json` });
   updateController = createUpdateController({
     extensionName,

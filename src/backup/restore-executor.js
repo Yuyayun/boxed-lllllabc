@@ -14,6 +14,7 @@ export async function executeRestorePlan({
   render,
   save,
   now,
+  beforeApply = async () => {},
 }) {
   const current = await readCurrent();
   if (!current?.ok) {
@@ -49,6 +50,7 @@ export async function executeRestorePlan({
 
   let snapshot;
   try {
+    await beforeApply({ current, plan });
     snapshot = applyRestorePlan(current.chat, plan);
   } catch (error) {
     if (plan.source === "full") {

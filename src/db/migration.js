@@ -1,6 +1,8 @@
 import { INDEXES, STORES, TRANSFER_STORES } from "./schema.js";
 
 export function migrateDatabase(db, transaction) {
+  if (!db.objectStoreNames.contains(STORES.snapshots)) db.createObjectStore(STORES.snapshots, { keyPath: "id" }).createIndex("by_chat", "chatKey");
+  if (!db.objectStoreNames.contains(STORES.snapshotMessages)) db.createObjectStore(STORES.snapshotMessages, { keyPath: ["snapshotId", "messageIndex"] }).createIndex("by_snapshot", "snapshotId");
   if (!db.objectStoreNames.contains(TRANSFER_STORES.meta)) db.createObjectStore(TRANSFER_STORES.meta, { keyPath: "key" });
   if (!db.objectStoreNames.contains(TRANSFER_STORES.rows)) {
     const rows = db.createObjectStore(TRANSFER_STORES.rows, { keyPath: ["id", "kind", "n"] });

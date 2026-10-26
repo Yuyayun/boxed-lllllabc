@@ -4,6 +4,14 @@ import { createIndexedDbTransfer } from "./indexeddb-transfer.js";
 // Keep compound operations in src/db/index.js: their validation and writes must
 // continue to run in the same IndexedDB transaction.
 const OPERATIONS = Object.freeze({
+  beginSnapshot: database.beginSnapshot,
+  appendSnapshotMessages: database.appendSnapshotMessages,
+  publishSnapshot: database.publishSnapshot,
+  getSnapshotHeader: database.getSnapshotHeader,
+  getSnapshotMessages: database.getSnapshotMessages,
+  listSnapshots: database.listSnapshots,
+  renameSnapshot: database.renameSnapshot,
+  deleteSnapshot: database.deleteSnapshot,
   getChatMeta: database.getChatMeta,
   putChatMeta: database.putChatMeta,
   updateChatMetaSummary: database.updateChatMetaSummary,

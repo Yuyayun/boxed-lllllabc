@@ -29,11 +29,17 @@ export function createStorageController({
       }
       session = await storage.open();
       const data = await session.getBackupCatalogData();
+      let snapshotBytes = 0, after = "";
+      if (session.listSnapshots) do {
+        const page = await session.listSnapshots({ after });
+        snapshotBytes += page.items.reduce((sum, item) => sum + (Number(item.contentBytes) || 0), 0);
+        after = page.after;
+      } while (after);
       const [catalog, estimate] = await Promise.all([
         Promise.resolve(buildCatalog(data)),
         estimateStorage(),
       ]);
-      latestSnapshot = createStorageSnapshot({ catalog, estimate });
+      latestSnapshot = createStorageSnapshot({ catalog: { ...catalog, storageBytes: (catalog.storageBytes || 0) + snapshotBytes }, estimate });
       renderOverview?.(latestSnapshot);
       if (notify) maybeWarn(latestSnapshot);
       return latestSnapshot;

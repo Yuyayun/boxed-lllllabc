@@ -50,6 +50,7 @@ export function fingerprintPending(records) {
       canonicalHash: record?.canonicalHash ?? "",
       canonicalChatHash: record?.canonicalChatHash ?? "",
       chatLength: Number.isInteger(record?.chatLength) ? record.chatLength : null,
+      ...(record?.snapshotSaveProof ? { snapshotSaveProof: record.snapshotSaveProof } : {}),
     }))
     .sort((left, right) => left.id.localeCompare(right.id)));
 }
