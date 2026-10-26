@@ -65,6 +65,14 @@ SillyTavern/public/scripts/extensions/third-party/boxed-lllllabc
 
 ## 基本使用
 
+### 可选 SQLite 后端（1.0.0 开发中）
+
+后端单独维护于 [Yuyayun/boxed-lllllabc-server](https://github.com/Yuyayun/boxed-lllllabc-server)，按其 README 自愿安装到酒馆服务器插件目录。前端不依赖它，未安装时继续正常使用 IndexedDB；安装、启用或连接后端都不会自动切换存储、迁移或同步数据。
+
+当前开发分支已提供 SQLite 插件协议和客户端，用户操作的「切换存储方式」尚待下一阶段实现，因此仍以 IndexedDB 为默认活动端。后端只支持默认用户或单个启用账户，具体 Node/酒馆兼容性及开发版本状态以独立后端仓库说明为准。
+
+### 当前备份操作
+
 1. 打开扩展设置，确认“启用本地备份”已经开启。
 2. 根据需要设置最近备份层数；完整聊天备份默认关闭，可自行开启。
 3. 打开任意聊天，通过最新楼层状态灯、魔法棒菜单或扩展设置进入当前聊天备份窗口。

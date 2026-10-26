@@ -17,7 +17,7 @@ export function createBackendVerifier({
   confirmFullBackup = async () => null,
   needsFullBackupConfirmation = async () => false,
   readBackend = readBackendChat,
-  deleteConfirmedPending = (records, shouldDelete) => deleteConfirmedPendingRecords(storage, records, shouldDelete),
+  deleteConfirmedPending = (records, shouldDelete, signal) => deleteConfirmedPendingRecords(storage, records, shouldDelete, signal),
   retryDelays = [2000, 5000, 10000],
   AbortControllerImpl = globalThis.AbortController,
   setTimer = globalThis.setTimeout,
@@ -26,6 +26,7 @@ export function createBackendVerifier({
   let verifyTimer = null;
   let verifyRunId = 0;
   let activeRequest = null;
+  let operationController = null;
   let effectQueue = Promise.resolve();
 
   function scheduleBackendVerification(chatKey, delayMs, retryIndex) {
@@ -74,10 +75,13 @@ export function createBackendVerifier({
     clearVerificationTimer();
     verifyRunId += 1;
     abortActiveRequest();
+    operationController?.abort?.();
+    operationController = null;
   }
 
   function beginVerificationRun() {
     clearScheduledVerification();
+    operationController = typeof AbortControllerImpl === "function" ? new AbortControllerImpl() : null;
     return verifyRunId;
   }
 
@@ -195,7 +199,7 @@ export function createBackendVerifier({
       if (confirmedRecords.length) {
         const deletion = await enqueueEffect(
           runId,
-          () => deleteConfirmedPending(confirmedRecords, () => isCurrentRun(runId)),
+          () => deleteConfirmedPending(confirmedRecords, () => isCurrentRun(runId), operationController?.signal),
         );
         if (!deletion.applied || !isCurrentRun(runId)) {
           return latestStatus();
@@ -480,10 +484,10 @@ export function createBackendVerifier({
   };
 }
 
-async function deleteConfirmedPendingRecords(storage, records, shouldDelete) {
+async function deleteConfirmedPendingRecords(storage, records, shouldDelete, signal) {
   const session = await storage.open();
   try {
-    return await session.deletePendingChangesIfUnchanged(records, { shouldDelete });
+    return await session.deletePendingChangesIfUnchanged(records, { shouldDelete, signal });
   } finally {
     session.close();
   }
