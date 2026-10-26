@@ -8,20 +8,7 @@ import { hashCanonicalChat } from "../backup/canonicalize.js";
 import { createHistoricalRecord } from "../backup/historical.js";
 import { createPendingRecords, summarizePendingChanges } from "../backup/pending.js";
 import { createBackupStatus, refreshRecentBackup } from "../backup/recent.js";
-import {
-  getChatMeta,
-  getFullMessages,
-  getHistoricalChanges,
-  getPendingChanges,
-  openBackupDatabase,
-  putFullMessages,
-  putHistoricalChanges,
-  putPendingChanges,
-  reconcileChatIdentity,
-  migrateRenamedChatIdentity,
-  replaceFullSnapshot,
-  updateChatMetaSummary,
-} from "../db/index.js";
+import { defaultBackupStorage } from "../storage/service.js";
 import { buildChatRenameIdentity, resolveChatRenameTarget } from "../identity.js";
 import { readOwnerChatCatalog } from "../rename/chat-catalog.js";
 import {
@@ -35,6 +22,7 @@ import { formatStatusText } from "../ui/presentation.js";
 import { readBackendChat } from "../verifier/backend-reader.js";
 
 export function createBackupCoordinator({
+  storage = defaultBackupStorage,
   getContextReader,
   getSettings,
   getLatestStatus,
@@ -48,9 +36,7 @@ export function createBackupCoordinator({
   verificationRetryLimit,
   eventTypes = {},
   readChatCatalog = readOwnerChatCatalog,
-  openRenameDatabase = openBackupDatabase,
-  migrateRename = migrateRenamedChatIdentity,
-  readRenameSourceMeta = readStoredChatMeta,
+  readRenameSourceMeta = (chatKey) => readStoredChatMeta(storage, chatKey),
   readRenameBackend = readBackendChat,
 }) {
   let legacyRenameObservation = null;
@@ -107,7 +93,7 @@ export function createBackupCoordinator({
     }
 
     try {
-      const db = await openBackupDatabase();
+      const session = await storage.open();
       try {
         const pendingRecords = triggerList.flatMap((item) => createPendingRecords({
           chat: current.chat,
@@ -116,9 +102,9 @@ export function createBackupCoordinator({
           args: item.args,
         }));
 
-        await putPendingChanges(db, pendingRecords);
+        await session.putPendingChanges(pendingRecords);
       } finally {
-        db.close();
+        session.close();
       }
     } catch (error) {
       console.error("[boxed-lllllabc] pending 写入失败", error);
@@ -141,6 +127,7 @@ export function createBackupCoordinator({
 
     if (settings.recentBackupEnabled) {
       const recentStatus = await refreshRecentBackup({
+        storage,
         contextReader,
         settings,
         reason: eventName,
@@ -209,11 +196,11 @@ export function createBackupCoordinator({
     }
 
     try {
-      const db = await openBackupDatabase();
+      const session = await storage.open();
       try {
         const [meta, messages] = await Promise.all([
-          getChatMeta(db, current.identity.chatKey),
-          getFullMessages(db, current.identity.chatKey),
+          session.getChatMeta(current.identity.chatKey),
+          session.getFullMessages(current.identity.chatKey),
         ]);
         const decision = createFullBackupDecision({
           existingMessages: messages,
@@ -240,7 +227,7 @@ export function createBackupCoordinator({
             ...decision.incident,
             notifiedAt: meta?.fullBackupIncident?.notifiedAt ?? new Date().toISOString(),
           };
-          await updateChatMetaSummary(db, current.identity.chatKey, createFullBackupAwaitingMeta({
+          await session.updateChatMetaSummary(current.identity.chatKey, createFullBackupAwaitingMeta({
             identity: current.identity,
             currentMessages: decision.currentMessages,
             previousMeta: meta,
@@ -259,7 +246,7 @@ export function createBackupCoordinator({
             ...decision.incident,
             notifiedAt: new Date().toISOString(),
           };
-          await updateChatMetaSummary(db, current.identity.chatKey, createFullBackupMeta({
+          await session.updateChatMetaSummary(current.identity.chatKey, createFullBackupMeta({
             identity: current.identity,
             messages,
             previousMeta: meta,
@@ -278,13 +265,13 @@ export function createBackupCoordinator({
           reason,
         });
         if (["create", "rebuild", "unfreeze", "reconcile"].includes(decision.action)) {
-          await replaceFullSnapshot(db, {
+          await session.replaceFullSnapshot({
             chatKey: current.identity.chatKey,
             messages: decision.currentMessages,
             meta: nextMeta,
           });
         } else {
-          await putFullMessages(db, {
+          await session.putFullMessages({
             chatKey: current.identity.chatKey,
             messages: decision.messages,
             meta: nextMeta,
@@ -292,7 +279,7 @@ export function createBackupCoordinator({
         }
         return null;
       } finally {
-        db.close();
+        session.close();
       }
     } catch (error) {
       console.error("[boxed-lllllabc] 完整聊天备份失败", error);
@@ -312,9 +299,9 @@ export function createBackupCoordinator({
 
   async function reconcileCurrentIdentity(identity) {
     try {
-      const db = await openBackupDatabase();
+      const session = await storage.open();
       try {
-        const result = await reconcileChatIdentity(db, identity);
+        const result = await session.reconcileChatIdentity(identity);
         if (result.status === "conflict") {
           return createBackupStatus(
             "db-error",
@@ -327,7 +314,7 @@ export function createBackupCoordinator({
         }
         return null;
       } finally {
-        db.close();
+        session.close();
       }
     } catch (error) {
       console.error("[boxed-lllllabc] 聊天身份接续失败", error);
@@ -417,9 +404,9 @@ export function createBackupCoordinator({
   async function migrateRenameIdentity(rename) {
 
     try {
-      const db = await openRenameDatabase();
+      const session = await storage.open();
       try {
-        const result = await migrateRename(db, rename);
+        const result = await session.migrateRenamedChatIdentity(rename);
         if (result.status === "conflict") {
           console.warn("[boxed-lllllabc] 聊天改名目标已有独立备份，已保留两边记录且没有覆盖。");
         } else if (result.status === "ambiguous") {
@@ -427,7 +414,7 @@ export function createBackupCoordinator({
         }
         return result;
       } finally {
-        db.close();
+        session.close();
       }
     } catch (error) {
       console.error("[boxed-lllllabc] 聊天改名备份迁移失败", error);
@@ -456,16 +443,16 @@ export function createBackupCoordinator({
     }
 
     try {
-      const db = await openBackupDatabase();
+      const session = await storage.open();
       try {
-        await putHistoricalChanges(db, records);
-        const historicalChanges = await getHistoricalChanges(db, current.identity.chatKey);
-        await updateChatMetaSummary(db, current.identity.chatKey, {
+        await session.putHistoricalChanges(records);
+        const historicalChanges = await session.getHistoricalChanges(current.identity.chatKey);
+        await session.updateChatMetaSummary(current.identity.chatKey, {
           historicalCount: historicalChanges.length,
           historicalUpdatedAt: new Date().toISOString(),
         });
       } finally {
-        db.close();
+        session.close();
       }
     } catch (error) {
       console.error("[boxed-lllllabc] 历史楼层备份失败", error);
@@ -480,14 +467,14 @@ export function createBackupCoordinator({
     }
 
     try {
-      const db = await openBackupDatabase();
+      const session = await storage.open();
       try {
-        const meta = await getChatMeta(db, chatKey);
+        const meta = await session.getChatMeta(chatKey);
         return shouldPrioritizeFullBackupWarning({ meta, settings })
           ? createBackupStatus("full-frozen", "聊天内容疑似异常，完整备份已保留")
           : status;
       } finally {
-        db.close();
+        session.close();
       }
     } catch (error) {
       console.warn("[boxed-lllllabc] 读取完整备份状态失败", error);
@@ -501,14 +488,14 @@ export function createBackupCoordinator({
       return false;
     }
     try {
-      const db = await openBackupDatabase();
+      const session = await storage.open();
       try {
-        const meta = await getChatMeta(db, chatKey);
+        const meta = await session.getChatMeta(chatKey);
         return meta?.fullBackupState === "awaiting-confirmation"
           || (meta?.fullBackupState === "frozen"
             && meta?.fullBackupIncident?.kind === "unexpected-message-change");
       } finally {
-        db.close();
+        session.close();
       }
     } catch (error) {
       console.warn("[boxed-lllllabc] 读取完整备份确认状态失败", error);
@@ -517,20 +504,20 @@ export function createBackupCoordinator({
   }
 
   async function readCurrentPending(chatKey) {
-    const db = await openBackupDatabase();
+    const session = await storage.open();
     try {
-      return await getPendingChanges(db, chatKey);
+      return await session.getPendingChanges(chatKey);
     } finally {
-      db.close();
+      session.close();
     }
   }
 
   async function updateBackendMeta(chatKey, backendStatus, pending) {
     try {
       const summary = summarizePendingChanges(pending);
-      const db = await openBackupDatabase();
+      const session = await storage.open();
       try {
-        await updateChatMetaSummary(db, chatKey, {
+        await session.updateChatMetaSummary(chatKey, {
           lastBackendStatus: backendStatus,
           lastBackendCheckedAt: new Date().toISOString(),
           pendingCount: summary.count,
@@ -538,7 +525,7 @@ export function createBackupCoordinator({
           pendingLastIndex: summary.lastIndex,
         });
       } finally {
-        db.close();
+        session.close();
       }
     } catch (error) {
       console.warn("[boxed-lllllabc] 后端状态摘要写入失败", error);
@@ -572,11 +559,11 @@ export function dedupeHistoricalRecords(records) {
   return [...latestByFloor.values()];
 }
 
-async function readStoredChatMeta(chatKey) {
-  const db = await openBackupDatabase();
+async function readStoredChatMeta(storage, chatKey) {
+  const session = await storage.open();
   try {
-    return await getChatMeta(db, chatKey);
+    return await session.getChatMeta(chatKey);
   } finally {
-    db.close();
+    session.close();
   }
 }

@@ -1,9 +1,10 @@
-import { deletePendingChangesIfUnchanged, openBackupDatabase } from "../db/index.js";
+import { defaultBackupStorage } from "../storage/service.js";
 import { hashCanonicalChat, stripChatHeader } from "../backup/canonicalize.js";
 import { readBackendChat } from "../verifier/backend-reader.js";
 import { comparePendingWithBackend } from "../verifier/compare.js";
 
 export function createBackendVerifier({
+  storage = defaultBackupStorage,
   getContextReader,
   getSettings,
   getLatestStatus,
@@ -16,7 +17,7 @@ export function createBackendVerifier({
   confirmFullBackup = async () => null,
   needsFullBackupConfirmation = async () => false,
   readBackend = readBackendChat,
-  deleteConfirmedPending = deleteConfirmedPendingRecords,
+  deleteConfirmedPending = (records, shouldDelete) => deleteConfirmedPendingRecords(storage, records, shouldDelete),
   retryDelays = [2000, 5000, 10000],
   AbortControllerImpl = globalThis.AbortController,
   setTimer = globalThis.setTimeout,
@@ -479,12 +480,12 @@ export function createBackendVerifier({
   };
 }
 
-async function deleteConfirmedPendingRecords(records, shouldDelete) {
-  const db = await openBackupDatabase();
+async function deleteConfirmedPendingRecords(storage, records, shouldDelete) {
+  const session = await storage.open();
   try {
-    return await deletePendingChangesIfUnchanged(db, records, { shouldDelete });
+    return await session.deletePendingChangesIfUnchanged(records, { shouldDelete });
   } finally {
-    db.close();
+    session.close();
   }
 }
 

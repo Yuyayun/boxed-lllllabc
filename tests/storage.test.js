@@ -73,8 +73,12 @@ test("存储控制器读取扩展占用并在高风险时每会话只提醒一�
   const warnings = [];
   const session = new Map();
   const controller = createStorageController({
-    openDatabase: async () => ({ close() { states.push("close"); } }),
-    readCatalogData: async () => ({ chatMeta: [] }),
+    storage: {
+      open: async () => ({
+        close() { states.push("close"); },
+        getBackupCatalogData: async () => ({ chatMeta: [] }),
+      }),
+    },
     buildCatalog: () => ({ storageBytes: 42, invalidRecordCount: 0 }),
     estimateStorage: async () => ({
       supported: true,

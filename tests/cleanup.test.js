@@ -154,11 +154,15 @@ test("全局控制器清理成功后关闭数据库并刷新索引与当前面�
   const calls = [];
   let closeCount = 0;
   const controller = createCatalogController({
-    openDatabase: async () => ({ close: () => { closeCount += 1; } }),
-    readCatalogData: async () => data,
-    deleteBackupType: async (_db, options) => {
-      calls.push(["delete", options]);
-      return { deletedCount: 2 };
+    storage: {
+      open: async () => ({
+        close: () => { closeCount += 1; },
+        getBackupCatalogData: async () => data,
+        deleteBackupTypeForChat: async (options) => {
+          calls.push(["delete", options]);
+          return { deletedCount: 2 };
+        },
+      }),
     },
     openDialog: () => {},
     renderDialog: (state) => calls.push(["render", state]),

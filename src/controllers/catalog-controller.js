@@ -1,6 +1,6 @@
 import { buildBackupCatalog } from "../backup/catalog.js";
 import { createBackupCleanupPlans, validateBackupCleanupPlan } from "../backup/cleanup.js";
-import { deleteBackupTypeForChat, getBackupCatalogData, openBackupDatabase } from "../db/index.js";
+import { defaultBackupStorage } from "../storage/service.js";
 import {
   openBackupCatalogDialog,
   renderBackupCatalogDialog,
@@ -8,10 +8,8 @@ import {
 import { openBackupCleanupDialog } from "../ui/backup-cleanup-dialog.js";
 
 export function createCatalogController({
-  openDatabase = openBackupDatabase,
-  readCatalogData = getBackupCatalogData,
+  storage = defaultBackupStorage,
   buildCatalog = buildBackupCatalog,
-  deleteBackupType = deleteBackupTypeForChat,
   openDialog = openBackupCatalogDialog,
   renderDialog = renderBackupCatalogDialog,
   openCleanupDialog = openBackupCleanupDialog,
@@ -21,10 +19,10 @@ export function createCatalogController({
 } = {}) {
   async function refreshCatalog() {
     renderDialog({ loading: true });
-    let db;
+    let session;
     try {
-      db = await openDatabase();
-      const data = await readCatalogData(db);
+      session = await storage.open();
+      const data = await session.getBackupCatalogData();
       const catalog = buildCatalog(data);
       renderDialog({ catalog });
       return { ok: true, catalog };
@@ -33,7 +31,7 @@ export function createCatalogController({
       renderDialog({ error: reason });
       return { ok: false, reason };
     } finally {
-      db?.close?.();
+      session?.close?.();
     }
   }
 
@@ -54,17 +52,17 @@ export function createCatalogController({
   }
 
   async function executeCleanup(plan) {
-    let db;
+    let session;
     try {
-      db = await openDatabase();
-      const data = await readCatalogData(db);
+      session = await storage.open();
+      const data = await session.getBackupCatalogData();
       const catalog = buildCatalog(data);
       const currentChat = catalog.chats.find((chat) => chat.chatKey === plan?.chatKey);
       const validation = validateBackupCleanupPlan({ plan, chat: currentChat });
       if (!validation.ok) {
         return validation;
       }
-      const result = await deleteBackupType(db, {
+      const result = await session.deleteBackupTypeForChat({
         chatKey: plan.chatKey,
         type: plan.type,
         expectedFingerprint: plan.expectedFingerprint,
@@ -76,7 +74,7 @@ export function createCatalogController({
         reason: error instanceof Error ? error.message : String(error),
       };
     } finally {
-      db?.close?.();
+      session?.close?.();
     }
   }
 

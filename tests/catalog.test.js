@@ -199,15 +199,17 @@ test("全局索引保留被隔离的异常记录数量", () => {
 
 test("全局备份控制器读取完成后关闭数据库并渲染索引", async () => {
   const calls = [];
-  const db = { close: () => calls.push("close") };
+  const session = {
+    close: () => calls.push("close"),
+    async getBackupCatalogData() {
+      calls.push(["read", this === session]);
+      return { chatMeta: [] };
+    },
+  };
   const catalog = { chatCount: 1, chats: [] };
   let refreshHandler;
   const controller = createCatalogController({
-    openDatabase: async () => db,
-    readCatalogData: async (receivedDb) => {
-      calls.push(["read", receivedDb === db]);
-      return { chatMeta: [] };
-    },
+    storage: { open: async () => session },
     buildCatalog: (data) => {
       calls.push(["build", data.chatMeta.length]);
       return catalog;
@@ -234,8 +236,12 @@ test("全局备份控制器读取失败时显示中文错误并关闭数据库",
   const states = [];
   let closed = 0;
   const controller = createCatalogController({
-    openDatabase: async () => ({ close: () => { closed += 1; } }),
-    readCatalogData: async () => { throw new Error("数据库读取失败"); },
+    storage: {
+      open: async () => ({
+        close: () => { closed += 1; },
+        getBackupCatalogData: async () => { throw new Error("数据库读取失败"); },
+      }),
+    },
     openDialog: () => {},
     renderDialog: (state) => states.push(state),
   });
@@ -252,11 +258,15 @@ test("打开全部聊天备份时先让弹层完成一帧显示再读取索引",
   const controller = createCatalogController({
     openDialog: () => calls.push("open"),
     waitForDialogPaint: async () => calls.push("paint"),
-    openDatabase: async () => {
-      calls.push("database");
-      return { close: () => calls.push("close") };
+    storage: {
+      open: async () => {
+        calls.push("database");
+        return {
+          close: () => calls.push("close"),
+          getBackupCatalogData: async () => ({ chatMeta: [] }),
+        };
+      },
     },
-    readCatalogData: async () => ({ chatMeta: [] }),
     buildCatalog: () => ({ chatCount: 0, chats: [] }),
     renderDialog: (state) => calls.push(state.loading ? "loading" : "catalog"),
   });

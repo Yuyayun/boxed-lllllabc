@@ -1,6 +1,6 @@
 import { canonicalizeRecentMessages } from "./canonicalize.js";
 import { classifyTriggers } from "./full.js";
-import { getRecentMessages, openBackupDatabase, replaceRecentSnapshot } from "../db/index.js";
+import { defaultBackupStorage } from "../storage/service.js";
 
 export function createBackupStatus(code, shortText, detail = "") {
   const errorName = detail instanceof Error ? String(detail.name || "") : "";
@@ -14,7 +14,7 @@ export function createBackupStatus(code, shortText, detail = "") {
   };
 }
 
-export async function refreshRecentBackup({ contextReader, settings, reason = "unknown", triggers = [] }) {
+export async function refreshRecentBackup({ contextReader, settings, reason = "unknown", triggers = [], storage = defaultBackupStorage }) {
   if (!settings.enabled) {
     return createBackupStatus("disabled", "未启用");
   }
@@ -47,9 +47,9 @@ export async function refreshRecentBackup({ contextReader, settings, reason = "u
   };
 
   try {
-    const db = await openBackupDatabase();
+    const session = await storage.open();
     try {
-      const existingMessages = await getRecentMessages(db, current.identity.chatKey);
+      const existingMessages = await session.getRecentMessages(current.identity.chatKey);
       if (shouldPreserveRecentSnapshot({
         existingMessages,
         currentChat: current.chat,
@@ -59,12 +59,12 @@ export async function refreshRecentBackup({ contextReader, settings, reason = "u
         return createBackupStatus("recent-preserved", `已保留较长的最近 ${existingMessages.length} 层备份`);
       }
 
-      await replaceRecentSnapshot(db, {
+      await session.replaceRecentSnapshot({
         meta,
         messages,
       });
     } finally {
-      db.close();
+      session.close();
     }
   } catch (error) {
     console.error("[boxed-lllllabc] 本地备份失败", error);

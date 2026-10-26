@@ -13,13 +13,14 @@ import {
   validateSaveRequestPlan,
   waitForSaveRequest,
 } from "../backup/save-request.js";
-import { openBackupDatabase, putPendingChanges, replacePendingChanges } from "../db/index.js";
+import { defaultBackupStorage } from "../storage/service.js";
 import { buildVisibleChatSummary } from "../ui/presentation.js";
 import { openRestoreDialog } from "../ui/restore-dialog.js";
 import { openRecoveryCenterDialog } from "../ui/recovery-center-dialog.js";
 import { openSaveRequestDialog } from "../ui/save-request-dialog.js";
 
 export function createRestoreController({
+  storage = defaultBackupStorage,
   getContextReader,
   getSettings,
   eventTypes,
@@ -184,19 +185,19 @@ export function createRestoreController({
       readCurrent: () => contextReader.readCurrentChat(),
       readPending: (chatKey) => readCurrentPending(chatKey),
       writePending: async (records) => {
-        const db = await openBackupDatabase();
+        const session = await storage.open();
         try {
-          await putPendingChanges(db, records);
+          await session.putPendingChanges(records);
         } finally {
-          db.close();
+          session.close();
         }
       },
       replacePending: async (records) => {
-        const db = await openBackupDatabase();
+        const session = await storage.open();
         try {
-          await replacePendingChanges(db, { chatKey: plan.chatKey, records });
+          await session.replacePendingChanges({ chatKey: plan.chatKey, records });
         } finally {
-          db.close();
+          session.close();
         }
       },
       render: renderRestoredMessages,
@@ -305,6 +306,7 @@ export function createRestoreController({
     await refreshHistoricalBackup({ current, settings, triggers });
     if (settings.recentBackupEnabled) {
       await refreshRecentBackup({
+        storage,
         contextReader: getContextReader(),
         settings,
         reason: "restore",

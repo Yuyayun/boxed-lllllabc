@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<title>箱装 P1 真实 IndexedDB 测试</title>
+<p>只允许在独立测试酒馆与全新浏览器资料中运行。</p>
+<script type="module">
+  import { seedAndTest, verifyPersistence } from "./storage-contract.js";
+  globalThis.boxedStorageContract = { seedAndTest, verifyPersistence };
+</script>
+</html>

@@ -1,16 +1,15 @@
 import { buildBackupCatalog } from "../backup/catalog.js";
-import { getBackupCatalogData, openBackupDatabase } from "../db/index.js";
+import { defaultBackupStorage } from "../storage/service.js";
 import { describeStorageFailure } from "../storage/health.js";
 import { createStorageSnapshot, estimateOriginStorage } from "../storage/quota.js";
 
 const WARNING_SESSION_KEY = "boxed-lllllabc:storage-warning-shown";
 
 export function createStorageController({
+  storage = defaultBackupStorage,
   renderOverview,
   showWarning,
   openCatalog,
-  openDatabase = openBackupDatabase,
-  readCatalogData = getBackupCatalogData,
   buildCatalog = buildBackupCatalog,
   estimateStorage = estimateOriginStorage,
   sessionStore = globalThis.sessionStorage,
@@ -18,10 +17,10 @@ export function createStorageController({
   let latestSnapshot = createStorageSnapshot();
 
   async function refresh({ notify = false } = {}) {
-    let db;
+    let session;
     try {
-      db = await openDatabase();
-      const data = await readCatalogData(db);
+      session = await storage.open();
+      const data = await session.getBackupCatalogData();
       const [catalog, estimate] = await Promise.all([
         Promise.resolve(buildCatalog(data)),
         estimateStorage(),
@@ -39,7 +38,7 @@ export function createStorageController({
       if (notify) maybeWarn(latestSnapshot);
       return latestSnapshot;
     } finally {
-      db?.close?.();
+      session?.close?.();
     }
   }
 

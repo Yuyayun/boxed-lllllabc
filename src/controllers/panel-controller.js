@@ -6,16 +6,7 @@ import {
   FROZEN_FULL_BACKUP_ACTIONS,
   validateFrozenFullBackupResolution,
 } from "../backup/frozen-resolution.js";
-import {
-  getChatMeta,
-  getFullMessages,
-  getHistoricalChanges,
-  getPendingChanges,
-  getRecentMessages,
-  openBackupDatabase,
-  resolveFrozenFullBackup,
-  updateChatMetaSummary,
-} from "../db/index.js";
+import { defaultBackupStorage } from "../storage/service.js";
 import { renderCurrentChatPanel } from "../ui/current-chat-panel.js";
 import { openFrozenBackupDialog } from "../ui/frozen-backup-dialog.js";
 import { createCurrentChatStorageText } from "../ui/storage-status.js";
@@ -26,6 +17,7 @@ import {
 } from "../ui/status-line.js";
 
 export function createPanelController({
+  storage = defaultBackupStorage,
   getContextReader,
   getSettings,
   getLatestStatus,
@@ -39,7 +31,6 @@ export function createPanelController({
   openBackupCleanup,
   getStorageSnapshot = () => ({}),
   openFrozenDialog = openFrozenBackupDialog,
-  resolveFrozenBackup = resolveFrozenFullBackup,
   onBackupsChanged = async () => {},
 }) {
   function getPanelElements(target = "settings") {
@@ -150,14 +141,14 @@ export function createPanelController({
     }
 
     try {
-      const db = await openBackupDatabase();
+      const session = await storage.open();
       try {
         const [messages, pending, fullMessages, historicalChanges, meta] = await Promise.all([
-          getRecentMessages(db, current.identity.chatKey),
-          getPendingChanges(db, current.identity.chatKey),
-          getFullMessages(db, current.identity.chatKey),
-          getHistoricalChanges(db, current.identity.chatKey),
-          getChatMeta(db, current.identity.chatKey),
+          session.getRecentMessages(current.identity.chatKey),
+          session.getPendingChanges(current.identity.chatKey),
+          session.getFullMessages(current.identity.chatKey),
+          session.getHistoricalChanges(current.identity.chatKey),
+          session.getChatMeta(current.identity.chatKey),
         ]);
         const panelMeta = { ...current.identity.meta, ...meta };
         const settings = getSettings();
@@ -227,7 +218,7 @@ export function createPanelController({
           },
         });
       } finally {
-        db.close();
+        session.close();
       }
     } catch (error) {
       renderCurrentChatPanel(panelBody, {
@@ -263,12 +254,12 @@ export function createPanelController({
     }
 
     const current = contextReader.readCurrentChat();
-    let db;
+    let session;
     try {
-      db = await openBackupDatabase();
+      session = await storage.open();
       const [meta, fullMessages] = await Promise.all([
-        getChatMeta(db, plan?.chatKey),
-        getFullMessages(db, plan?.chatKey),
+        session.getChatMeta(plan?.chatKey),
+        session.getFullMessages(plan?.chatKey),
       ]);
       const validation = validateFrozenFullBackupResolution({
         plan,
@@ -285,7 +276,7 @@ export function createPanelController({
       const messages = action === FROZEN_FULL_BACKUP_ACTIONS.adoptCurrent
         ? current.chat.map((message, index) => canonicalizeMessage(message, index, now))
         : [];
-      const result = await resolveFrozenBackup(db, {
+      const result = await session.resolveFrozenFullBackup({
         chatKey: plan.chatKey,
         action,
         expectedFullFingerprint: plan.expectedFullFingerprint,
@@ -303,7 +294,7 @@ export function createPanelController({
         reason: error instanceof Error ? error.message : String(error),
       };
     } finally {
-      db?.close?.();
+      session?.close?.();
     }
   }
 
@@ -318,13 +309,13 @@ export function createPanelController({
       return;
     }
 
-    const db = await openBackupDatabase();
+    const session = await storage.open();
     try {
-      const meta = await getChatMeta(db, current.identity.chatKey);
+      const meta = await session.getChatMeta(current.identity.chatKey);
       if (meta?.fullBackupState !== "frozen" || meta?.fullBackupIncident?.acknowledgedAt) {
         return;
       }
-      await updateChatMetaSummary(db, current.identity.chatKey, {
+      await session.updateChatMetaSummary(current.identity.chatKey, {
         fullBackupIncident: {
           ...meta.fullBackupIncident,
           acknowledgedAt: new Date().toISOString(),
@@ -337,7 +328,7 @@ export function createPanelController({
           : createDisplayStatus("saved", "酒馆已保存聊天记录"));
       }
     } finally {
-      db.close();
+      session.close();
     }
   }
 

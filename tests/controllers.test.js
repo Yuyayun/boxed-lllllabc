@@ -75,10 +75,14 @@ test("备份协调器能从正式 CHAT_RENAMED 事件读取当前身份并执行
         },
       }),
     }),
-    openRenameDatabase: async () => ({ close() { closed += 1; } }),
-    migrateRename: async (_db, rename) => {
-      receivedRename = rename;
-      return { status: "migrate" };
+    storage: {
+      open: async () => ({
+        close() { closed += 1; },
+        async migrateRenamedChatIdentity(rename) {
+          receivedRename = rename;
+          return { status: "migrate" };
+        },
+      }),
     },
   });
 

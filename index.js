@@ -15,6 +15,7 @@ import { registerPageLifecycle } from "./src/lifecycle.js";
 import { createPageReloadScheduler } from "./src/reload.js";
 import { createBackupStatus } from "./src/backup/recent.js";
 import { createSettingsAccessor } from "./src/settings.js";
+import { createBackupStorage } from "./src/storage/service.js";
 import { ensureStatusLine, updateStatusLine } from "./src/ui/status-line.js";
 import {
   bindUpdateAction,
@@ -27,6 +28,7 @@ import { openStorageWarningDialog, renderSettingsStorage } from "./src/ui/storag
 const extensionName = "boxed-lllllabc";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
 
+const backupStorage = createBackupStorage();
 const verifyRetryDelays = [2000, 5000, 10000];
 const getSettings = createSettingsAccessor({ extensionSettings: extension_settings, extensionName });
 
@@ -64,6 +66,7 @@ function initializeControllers() {
   };
 
   backupCoordinator = createBackupCoordinator({
+    storage: backupStorage,
     getContextReader,
     getSettings,
     getLatestStatus,
@@ -79,6 +82,7 @@ function initializeControllers() {
   });
 
   backendVerifier = createBackendVerifier({
+    storage: backupStorage,
     getContextReader,
     getSettings,
     getLatestStatus,
@@ -94,6 +98,7 @@ function initializeControllers() {
   });
 
   restoreController = createRestoreController({
+    storage: backupStorage,
     getContextReader,
     getSettings,
     eventTypes: event_types,
@@ -108,6 +113,7 @@ function initializeControllers() {
   });
 
   panelController = createPanelController({
+    storage: backupStorage,
     getContextReader,
     getSettings,
     getLatestStatus,
@@ -124,11 +130,13 @@ function initializeControllers() {
   });
 
   catalogController = createCatalogController({
+    storage: backupStorage,
     refreshVisiblePanel,
     onCatalogChanged: () => storageController?.refresh(),
   });
 
   storageController = createStorageController({
+    storage: backupStorage,
     renderOverview: renderSettingsStorage,
     showWarning: openStorageWarningDialog,
     openCatalog: () => catalogController?.openCatalog(),
