@@ -111,16 +111,25 @@
           </span>
         </label>
 
+        <section class="boxed-lllllabc-storage-mode" aria-label="存储方式与状态">
+          <strong>存储方式与状态</strong>
+          <p>当前活动端：<span id="boxed-lllllabc-storage-mode">正在读取</span></p>
+          <p id="boxed-lllllabc-sqlite-state">正在检查可选后端</p>
+          <button id="boxed-lllllabc-check-storage" class="menu_button" type="button">检查连接</button>
+          <button id="boxed-lllllabc-switch-storage" class="menu_button" type="button" disabled>切换存储方式</button>
+          <button id="boxed-lllllabc-clear-inactive" class="menu_button" type="button" disabled>清空旧端数据</button>
+          <p id="boxed-lllllabc-transfer-result" role="status"></p>
+        </section>
         <section class="boxed-lllllabc-storage-overview" aria-labelledby="boxed-lllllabc-storage-title">
           <div class="boxed-lllllabc-storage-heading">
             <strong id="boxed-lllllabc-storage-title">本地存储</strong>
             <span id="boxed-lllllabc-storage-state" data-tone="unavailable">正在读取</span>
           </div>
-          <p class="boxed-lllllabc-storage-help">备份只保存在当前酒馆地址；各项统计方式不同，数值可能不完全对应。</p>
+          <p id="boxed-lllllabc-storage-help" class="boxed-lllllabc-storage-help">备份只保存在当前酒馆地址；各项统计方式不同，数值可能不完全对应。</p>
           <dl class="boxed-lllllabc-storage-metrics">
             <div><dt>备份内容大小（估算）</dt><dd id="boxed-lllllabc-storage-extension">正在计算</dd></div>
-            <div><dt>当前酒馆已使用</dt><dd id="boxed-lllllabc-storage-site">正在读取</dd></div>
-            <div><dt>当前酒馆还可使用</dt><dd id="boxed-lllllabc-storage-remaining">正在读取</dd></div>
+            <div><dt id="boxed-lllllabc-storage-site-label">当前酒馆已使用</dt><dd id="boxed-lllllabc-storage-site">正在读取</dd></div>
+            <div><dt id="boxed-lllllabc-storage-remaining-label">当前酒馆还可使用</dt><dd id="boxed-lllllabc-storage-remaining">正在读取</dd></div>
           </dl>
           <p id="boxed-lllllabc-storage-issue" class="boxed-lllllabc-storage-issue" hidden></p>
         </section>

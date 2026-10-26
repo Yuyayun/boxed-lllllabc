@@ -13,10 +13,11 @@ export function registerBackupEvents({
   let queuedTriggers = [];
   let queuedRun = Promise.resolve();
   let stopped = false;
+  let paused = false;
   const handlers = new Map();
 
   const schedule = (trigger) => {
-    if (stopped) {
+    if (stopped || paused) {
       return;
     }
     queuedTriggers.push(trigger);
@@ -55,7 +56,7 @@ export function registerBackupEvents({
   };
 
   const enqueueRename = (trigger) => {
-    if (stopped) {
+    if (stopped || paused) {
       return queuedRun;
     }
     if (timer) {
@@ -116,6 +117,8 @@ export function registerBackupEvents({
 
   return {
     flush: enqueueQueuedTriggers,
+    async pause() { paused = true; await enqueueQueuedTriggers(); },
+    resume() { paused = false; },
     unregister,
     whenIdle: () => queuedRun,
   };

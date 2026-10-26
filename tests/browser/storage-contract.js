@@ -38,7 +38,7 @@ const identity = (marker) => ({
 export async function seedAndTest() {
   guard();
   assert(!(await indexedDB.databases()).some((db) => db.name === DB_NAME), "要求全新浏览器资料，拒绝覆盖已有库。");
-  await run("真实 v3 旧库升级至 v5，原元数据、recent 和 pending 保留", async () => {
+  await run(`真实 v3 旧库升级至 v${DB_VERSION}，原元数据、recent 和 pending 保留`, async () => {
     const request = indexedDB.open(DB_NAME, 3);
     request.onupgradeneeded = () => {
       const db = request.result;

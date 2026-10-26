@@ -1,4 +1,5 @@
 import * as database from "../db/index.js";
+import { createIndexedDbTransfer } from "./indexeddb-transfer.js";
 
 // Keep compound operations in src/db/index.js: their validation and writes must
 // continue to run in the same IndexedDB transaction.
@@ -33,6 +34,13 @@ const OPERATIONS = Object.freeze({
 export function createIndexedDbStorage({ openDatabase = database.openBackupDatabase } = {}) {
   return Object.freeze({
     mode: "indexeddb",
+    async checkCapacity(manifest) {
+      let estimate;
+      try { estimate = await globalThis.navigator?.storage?.estimate?.(); }
+      catch { return; }
+      if (Number.isFinite(estimate?.quota) && Number.isFinite(estimate?.usage) && estimate.quota - estimate.usage < manifest.bytes * 2) throw new Error("浏览器可用配额不足以保留暂存和回滚副本，未替换目标数据。");
+    },
+    transfer: createIndexedDbTransfer({ openDatabase }),
     async open() {
       const db = await openDatabase();
       const session = { close: () => db.close() };

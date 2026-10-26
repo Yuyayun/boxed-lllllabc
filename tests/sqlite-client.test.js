@@ -2,17 +2,24 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createSqliteStorage } from "../src/storage/sqlite-client.js";
 import { createBackupStorage } from "../src/storage/service.js";
-import { encodeStorageValue, decodeStorageValue } from "../src/storage/protocol.js";
+import { STORAGE_PROTOCOL, encodeStorageValue, decodeStorageValue } from "../src/storage/protocol.js";
 import { createBackendVerifier } from "../src/controllers/backend-verifier.js";
 import { createMessageRecord } from "../src/backup/pending.js";
 
 const response = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
 
+test("SQLite 空间预检查只读取服务端容量，不足时拒绝暂存", async () => {
+  const calls=[];
+  const adapter=createSqliteStorage({fetchImpl:async(url)=>{calls.push(url);return response({ok:true,protocol:STORAGE_PROTOCOL,database:{availableBytes:100,bytes:100}});}});
+  await assert.rejects(adapter.checkCapacity({bytes:100}),/空间不足/);
+  assert.deepEqual(calls,["/api/plugins/boxed-lllllabc/status"]);
+});
+
 test("无后端、协议不兼容、多账户和连接超时均给出不可用状态", async () => {
   for (const [reply, code] of [
     [response({}, 404), "unavailable"],
     [response({ ok: true, protocol: 99 }), "protocol-incompatible"],
-    [response({ ok: false, protocol: 1, code: "multi-user", reason: "多个账户" }, 403), "multi-user"],
+    [response({ ok: false, protocol: STORAGE_PROTOCOL, code: "multi-user", reason: "多个账户" }, 403), "multi-user"],
   ]) {
     const adapter = createSqliteStorage({ fetchImpl: async () => reply });
     assert.equal((await adapter.status()).code, code);
@@ -25,7 +32,7 @@ test("无后端、协议不兼容、多账户和连接超时均给出不可用�
 test("后端连接仅提供可选适配器，不改变默认 IndexedDB 或自动复制记录", async () => {
   const calls = [];
   const defaults = createBackupStorage();
-  const sqlite = createSqliteStorage({ fetchImpl: async (url) => { calls.push(url); return response({ ok: true, protocol: 1 }); } });
+  const sqlite = createSqliteStorage({ fetchImpl: async (url) => { calls.push(url); return response({ ok: true, protocol: STORAGE_PROTOCOL }); } });
   assert.equal((await sqlite.status()).ok, true);
   assert.equal(defaults.getMode(), "indexeddb");
   assert.deepEqual(calls, ["/api/plugins/boxed-lllllabc/status"]);
@@ -37,9 +44,9 @@ test("SQLite 客户端只发同源操作和原生 CSRF 头，无损读回并禁�
   const adapter = createSqliteStorage({ getRequestHeaders: () => ({ "X-CSRF-Token": "test-token" }), fetchImpl: async (url, options) => {
     assert.equal(options.credentials, "same-origin");
     assert.equal(options.headers["X-CSRF-Token"], "test-token");
-    if (url.endsWith("/status")) return response({ ok: true, protocol: 1 });
+    if (url.endsWith("/status")) return response({ ok: true, protocol: STORAGE_PROTOCOL });
     body = JSON.parse(options.body);
-    return response({ ok: true, protocol: 1, value: encodeStorageValue(value) });
+    return response({ ok: true, protocol: STORAGE_PROTOCOL, value: encodeStorageValue(value) });
   } });
   const session = await adapter.open();
   assert.deepEqual(await session.getChatMeta("fictional"), value);
@@ -52,7 +59,7 @@ test("SQLite 客户端只发同源操作和原生 CSRF 头，无损读回并禁�
 
 test("SQLite 写入失败不回退；不支持值不会发出写入请求", async () => {
   const calls = [];
-  const adapter = createSqliteStorage({ fetchImpl: async (url) => { calls.push(url); return response(url.endsWith("/status") ? { ok: true, protocol: 1 } : { ok: false, protocol: 1, code: "database-unavailable", reason: "只读" }, url.endsWith("/status") ? 200 : 503); } });
+  const adapter = createSqliteStorage({ fetchImpl: async (url) => { calls.push(url); return response(url.endsWith("/status") ? { ok: true, protocol: STORAGE_PROTOCOL } : { ok: false, protocol: STORAGE_PROTOCOL, code: "database-unavailable", reason: "只读" }, url.endsWith("/status") ? 200 : 503); } });
   const session = await adapter.open();
   await assert.rejects(session.putChatMeta({ chatKey: "fictional" }), /只读/);
   await assert.rejects(session.putChatMeta({ chatKey: "fictional", fn() {} }), /无法无损/);
@@ -62,7 +69,7 @@ test("SQLite 写入失败不回退；不支持值不会发出写入请求", asyn
 
 test("带任务保护的 pending 删除必须有取消信号，已取消任务不会写入", async () => {
   let requests = 0;
-  const adapter = createSqliteStorage({ fetchImpl: async () => { requests += 1; return response({ ok: true, protocol: 1 }); } });
+  const adapter = createSqliteStorage({ fetchImpl: async () => { requests += 1; return response({ ok: true, protocol: STORAGE_PROTOCOL }); } });
   const session = await adapter.open();
   assert.deepEqual(await session.deletePendingChangesIfUnchanged([], { shouldDelete: () => false }), []);
   await assert.rejects(session.deletePendingChangesIfUnchanged([], { shouldDelete: () => true }), /取消信号/);

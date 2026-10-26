@@ -1,6 +1,11 @@
-import { INDEXES, STORES } from "./schema.js";
+import { INDEXES, STORES, TRANSFER_STORES } from "./schema.js";
 
 export function migrateDatabase(db, transaction) {
+  if (!db.objectStoreNames.contains(TRANSFER_STORES.meta)) db.createObjectStore(TRANSFER_STORES.meta, { keyPath: "key" });
+  if (!db.objectStoreNames.contains(TRANSFER_STORES.rows)) {
+    const rows = db.createObjectStore(TRANSFER_STORES.rows, { keyPath: ["id", "kind", "n"] });
+    rows.createIndex("unique_record", ["id", "kind", "keyText"], { unique: true });
+  }
   let chatMeta;
   if (!db.objectStoreNames.contains(STORES.chatMeta)) {
     chatMeta = db.createObjectStore(STORES.chatMeta, {

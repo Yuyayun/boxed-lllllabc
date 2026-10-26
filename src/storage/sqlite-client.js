@@ -36,6 +36,17 @@ export function createSqliteStorage({ fetchImpl = globalThis.fetch, getRequestHe
   }
   return Object.freeze({
     mode: "sqlite", status,
+    async checkCapacity(manifest) {
+      const health = await status();
+      if (!health.ok) throw new Error(health.reason);
+      const free = health.database?.availableBytes;
+      if (Number.isFinite(free) && free < manifest.bytes * 2 + health.database.bytes) throw new Error("服务器可用空间不足以保留暂存和回滚副本，未替换目标数据。");
+    },
+    async transfer(action, args) {
+      const result = await request("transfer", { protocol: STORAGE_PROTOCOL, action, args: encodeStorageValue(args) });
+      if (!result.ok) throw Object.assign(new Error(result.reason), { code: result.code });
+      return decodeStorageValue(result.value);
+    },
     async open() {
       const health = await status();
       if (!health.ok) throw Object.assign(new Error(health.reason), { code: health.code });

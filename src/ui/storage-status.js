@@ -3,10 +3,14 @@ import { formatStorageSize } from "../backup/catalog.js";
 const WARNING_DIALOG_ID = "boxed-lllllabc-storage-warning-dialog";
 
 export function renderSettingsStorage(snapshot = {}) {
+  const sqlite = snapshot.mode === "sqlite";
+  setText("#boxed-lllllabc-storage-site-label", sqlite ? "SQLite 数据库文件占用" : "当前酒馆已使用");
+  setText("#boxed-lllllabc-storage-remaining-label", sqlite ? "服务器剩余空间" : "当前酒馆还可使用");
+  setText("#boxed-lllllabc-storage-help", sqlite ? "当前统计来自 SQLite；文件占用包含日志文件，服务器剩余空间暂不估算。" : "备份只保存在当前酒馆地址；各项统计方式不同，数值可能不完全对应。");
   setText("#boxed-lllllabc-storage-extension", formatStorageSize(snapshot.extensionBytes));
   setText(
     "#boxed-lllllabc-storage-site",
-    snapshot.estimate?.supported ? formatStorageSize(snapshot.estimate.usage) : "浏览器未提供",
+    sqlite ? formatStorageSize(snapshot.databaseBytes) : snapshot.estimate?.supported ? formatStorageSize(snapshot.estimate.usage) : "浏览器未提供",
   );
   setText(
     "#boxed-lllllabc-storage-remaining",
@@ -94,6 +98,7 @@ export function openStorageWarningDialog({ snapshot = {}, onManage } = {}) {
 
 function storageStateText(snapshot) {
   if (snapshot.failure) return snapshot.failure.shortText;
+  if (snapshot.mode === "sqlite") return "SQLite 已连接";
   if (snapshot.pressure === "critical") return "空间非常紧张";
   if (snapshot.pressure === "warning") return "建议留意空间";
   if (snapshot.pressure === "normal") return "空间充足";

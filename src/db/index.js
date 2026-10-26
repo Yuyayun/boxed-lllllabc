@@ -1,5 +1,5 @@
 import { migrateDatabase } from "./migration.js";
-import { DB_NAME, DB_VERSION } from "./schema.js";
+import { DB_NAME, DB_VERSION, TRANSFER_STORES } from "./schema.js";
 import { createBackupOperations } from "../storage/operations.js";
 
 export function openBackupDatabase() {
@@ -9,14 +9,16 @@ export function openBackupDatabase() {
 
   return new Promise((resolve, reject) => {
     const request = globalThis.indexedDB.open(DB_NAME, DB_VERSION);
+    let blocked = false;
 
     request.onupgradeneeded = () => {
+      if (blocked) { request.transaction.abort(); return; }
       migrateDatabase(request.result, request.transaction);
     };
 
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => { if (blocked) request.result.close(); else resolve(request.result); };
     request.onerror = () => reject(request.error ?? new Error("打开 IndexedDB 失败。"));
-    request.onblocked = () => reject(new Error("IndexedDB 升级被其他页面阻塞。"));
+    request.onblocked = () => { blocked = true; reject(new Error("IndexedDB 升级被其他页面阻塞，请关闭其他酒馆页签后重试。")); };
   });
 }
 
@@ -47,7 +49,8 @@ export const {
 
 function runTransaction(db, storeNames, mode, callback) {
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(storeNames, mode);
+    const guarded = db.objectStoreNames?.contains(TRANSFER_STORES.meta);
+    const transaction = db.transaction(guarded ? [...storeNames, TRANSFER_STORES.meta] : storeNames, mode);
     const stores = new Map(storeNames.map((name) => [name, transaction.objectStore(name)]));
     let callbackResult;
 
@@ -56,7 +59,18 @@ function runTransaction(db, storeNames, mode, callback) {
     transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB 事务中止。"));
 
     Promise.resolve()
-      .then(() => callback(stores))
+      .then(async () => {
+        if (guarded && (await requestToPromise(transaction.objectStore(TRANSFER_STORES.meta).get("lock")))?.value) throw new Error("切换存储方式期间备份操作已锁定。");
+        return callback(stores);
+      })
+      .then(async (result) => {
+        if (guarded && mode === "readwrite") {
+          const meta = transaction.objectStore(TRANSFER_STORES.meta);
+          const revision = (await requestToPromise(meta.get("revision")))?.value ?? 0;
+          await requestToPromise(meta.put({ key: "revision", value: revision + 1 }));
+        }
+        return result;
+      })
       .then((result) => {
         callbackResult = result;
       })

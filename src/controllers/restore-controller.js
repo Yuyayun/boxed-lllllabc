@@ -21,6 +21,7 @@ import { openSaveRequestDialog } from "../ui/save-request-dialog.js";
 
 export function createRestoreController({
   storage = defaultBackupStorage,
+  runGuard = (operation) => operation(),
   getContextReader,
   getSettings,
   eventTypes,
@@ -178,7 +179,8 @@ export function createRestoreController({
     });
   }
 
-  async function confirmRestore(plan) {
+  const confirmRestore = (plan) => runGuard(() => confirmRestoreImpl(plan)).catch((error) => ({ ok: false, reason: error.message }));
+  async function confirmRestoreImpl(plan) {
     const contextReader = getContextReader();
     const result = await executeRestorePlan({
       plan,
@@ -233,7 +235,8 @@ export function createRestoreController({
     return result;
   }
 
-  async function requestSave(plan) {
+  const requestSave = (plan) => runGuard(() => requestSaveImpl(plan)).catch((error) => ({ ok: false, reason: error.message }));
+  async function requestSaveImpl(plan) {
     const current = getContextReader().readCurrentChat();
     const pending = current.ok
       ? await readCurrentPending(current.identity.chatKey)

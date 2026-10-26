@@ -18,6 +18,7 @@ import {
 
 export function createPanelController({
   storage = defaultBackupStorage,
+  runGuard = (operation) => operation(),
   getContextReader,
   getSettings,
   getLatestStatus,
@@ -247,7 +248,8 @@ export function createPanelController({
     }
   }
 
-  async function executeFrozenResolution(plan, action) {
+  const executeFrozenResolution = (plan, action) => runGuard(() => executeFrozenResolutionImpl(plan, action)).catch((error) => ({ ok: false, reason: error.message }));
+  async function executeFrozenResolutionImpl(plan, action) {
     const contextReader = getContextReader();
     if (!contextReader) {
       return { ok: false, reason: "扩展尚未准备好，请关闭后重新打开。" };

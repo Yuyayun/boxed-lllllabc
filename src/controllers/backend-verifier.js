@@ -475,6 +475,7 @@ export function createBackendVerifier({
   }
 
   return {
+    whenIdle: () => effectQueue,
     clearScheduledVerification,
     retryLimit: retryDelays.length,
     scheduleBackendSnapshotVerification,

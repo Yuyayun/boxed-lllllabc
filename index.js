@@ -1,5 +1,6 @@
 import { extension_settings, getContext } from "../../../extensions.js";
 import { eventSource, event_types, getRequestHeaders, saveSettingsDebounced } from "../../../../script.js";
+import * as Tavern from "../../../../script.js";
 
 import { createBackendVerifier } from "./src/controllers/backend-verifier.js";
 import { createBackupCoordinator } from "./src/controllers/backup-coordinator.js";
@@ -15,7 +16,13 @@ import { registerPageLifecycle } from "./src/lifecycle.js";
 import { createPageReloadScheduler } from "./src/reload.js";
 import { createBackupStatus } from "./src/backup/recent.js";
 import { createSettingsAccessor } from "./src/settings.js";
-import { createBackupStorage } from "./src/storage/service.js";
+import { createIndexedDbStorage } from "./src/storage/indexeddb-adapter.js";
+import { createSqliteStorage } from "./src/storage/sqlite-client.js";
+import { createStorageControl } from "./src/storage/control.js";
+import { createManagedStorage, createOperationGate } from "./src/storage/managed.js";
+import { createTransferCoordinator } from "./src/storage/transfer.js";
+import { sha256 } from "./src/storage/transfer-format.js";
+import { createStorageSwitchUi } from "./src/ui/storage-switch.js";
 import { ensureStatusLine, updateStatusLine } from "./src/ui/status-line.js";
 import {
   bindUpdateAction,
@@ -28,7 +35,44 @@ import { openStorageWarningDialog, renderSettingsStorage } from "./src/ui/storag
 const extensionName = "boxed-lllllabc";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
 
-const backupStorage = createBackupStorage();
+const storageControl = createStorageControl();
+const adapters = { indexeddb: createIndexedDbStorage(), sqlite: createSqliteStorage({ getRequestHeaders }) };
+const backupStorage = createManagedStorage({ control: storageControl, adapters });
+const operationGate = createOperationGate();
+let switchUi;
+let migrationContext;
+function isGenerating() {
+  if (typeof Tavern.isGenerating === "function") return Tavern.isGenerating();
+  const stop = document.querySelector("#mes_stop");
+  return Boolean(Tavern.is_send_press || stop && getComputedStyle(stop).display !== "none");
+}
+async function contextFingerprint() {
+  const context = getContext();
+  return sha256(JSON.stringify([context.characterId, context.groupId, context.chatId, context.chatMetadata, context.chat]));
+}
+const transferCoordinator = createTransferCoordinator({
+  control: storageControl, adapters,
+  pause: async () => {
+    if (isGenerating()) throw new Error("请先停止生成，再切换或清空存储。");
+    switchUi?.block();
+    backendVerifier?.clearScheduledVerification();
+    await backupEvents?.pause();
+    backendVerifier?.clearScheduledVerification();
+    await operationGate.pause();
+    backendVerifier?.clearScheduledVerification();
+    await backendVerifier?.whenIdle();
+    if (isGenerating()) throw new Error("检测到生成已开始，未执行切换。");
+    migrationContext = await contextFingerprint();
+  },
+  validate: async () => {
+    if (isGenerating() || migrationContext !== await contextFingerprint()) throw new Error("当前聊天或生成状态发生变化，已停止提交并保留两端原数据。");
+  },
+  resume: async () => {
+    await backupStorage.refresh();
+    operationGate.resume(); backupEvents?.resume(); switchUi?.close();
+  },
+  progress: (message) => switchUi?.progress(message),
+});
 const verifyRetryDelays = [2000, 5000, 10000];
 const getSettings = createSettingsAccessor({ extensionSettings: extension_settings, extensionName });
 
@@ -98,6 +142,7 @@ function initializeControllers() {
   });
 
   restoreController = createRestoreController({
+    runGuard: operationGate.run,
     storage: backupStorage,
     getContextReader,
     getSettings,
@@ -113,6 +158,7 @@ function initializeControllers() {
   });
 
   panelController = createPanelController({
+    runGuard: operationGate.run,
     storage: backupStorage,
     getContextReader,
     getSettings,
@@ -130,6 +176,7 @@ function initializeControllers() {
   });
 
   catalogController = createCatalogController({
+    runGuard: operationGate.run,
     storage: backupStorage,
     refreshVisiblePanel,
     onCatalogChanged: () => storageController?.refresh(),
@@ -144,7 +191,8 @@ function initializeControllers() {
 }
 
 async function runBackupNow(...args) {
-  const status = await backupCoordinator.runBackupNow(...args);
+  if (operationGate.isPaused()) return latestStatus;
+  const status = await operationGate.run(() => backupCoordinator.runBackupNow(...args));
   storageController?.handleBackupStatus(status);
   return status;
 }
@@ -271,7 +319,7 @@ jQuery(async () => {
     eventSource,
     eventTypes: event_types,
     onChatRenamed: async (trigger) => {
-      await backupCoordinator.handleChatRenamed(trigger.args);
+      await operationGate.run(() => backupCoordinator.handleChatRenamed(trigger.args));
     },
     onBackupNeeded: async (trigger) => {
       await runBackupNow(trigger);
@@ -289,6 +337,21 @@ jQuery(async () => {
     },
   });
 
+  switchUi = createStorageSwitchUi({
+    control: storageControl, sqlite: adapters.sqlite, coordinator: transferCoordinator, isGenerating,
+    afterChange: async () => { await backupStorage.refresh(); await panelController.refreshVisiblePanel(); await storageController.refresh(); },
+  });
+  switchUi.bind();
+  try {
+    await backupStorage.refresh();
+    await transferCoordinator.recover();
+    await switchUi.refresh();
+  } catch (error) {
+    await operationGate.pause();
+    await switchUi.failure(error);
+    setStatus(createBackupStatus("db-error", "存储操作待恢复"));
+    return;
+  }
   setStatus(await runBackupNow({ eventName: "extension-loaded", args: [] }));
   await storageController.refresh({ notify: true });
 });

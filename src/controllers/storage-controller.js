@@ -19,6 +19,14 @@ export function createStorageController({
   async function refresh({ notify = false } = {}) {
     let session;
     try {
+      await storage.refresh?.();
+      if (storage.getMode?.() === "sqlite") {
+        const status = await storage.status();
+        if (!status?.ok) throw new Error(status?.reason || "SQLite 状态不可用。");
+        latestSnapshot = { ...createStorageSnapshot({ catalog: { storageBytes: status.database.counts.reduce((sum, row) => sum + row.bytes, 0) } }), mode: "sqlite", databaseBytes: status.database.bytes };
+        renderOverview?.(latestSnapshot);
+        return latestSnapshot;
+      }
       session = await storage.open();
       const data = await session.getBackupCatalogData();
       const [catalog, estimate] = await Promise.all([
@@ -32,8 +40,9 @@ export function createStorageController({
     } catch (error) {
       latestSnapshot = createStorageSnapshot({
         failure: describeStorageFailure(error),
-        estimate: await estimateStorage(),
+        estimate: storage.getMode?.() === "sqlite" ? {} : await estimateStorage(),
       });
+      latestSnapshot.mode = storage.getMode?.();
       renderOverview?.(latestSnapshot);
       if (notify) maybeWarn(latestSnapshot);
       return latestSnapshot;

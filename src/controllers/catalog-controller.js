@@ -9,6 +9,7 @@ import { openBackupCleanupDialog } from "../ui/backup-cleanup-dialog.js";
 
 export function createCatalogController({
   storage = defaultBackupStorage,
+  runGuard = (operation) => operation(),
   buildCatalog = buildBackupCatalog,
   openDialog = openBackupCatalogDialog,
   renderDialog = renderBackupCatalogDialog,
@@ -78,7 +79,8 @@ export function createCatalogController({
     }
   }
 
-  async function finishCleanup(plan) {
+  const finishCleanup = (plan) => runGuard(() => finishCleanupImpl(plan)).catch((error) => ({ ok: false, reason: error.message }));
+  async function finishCleanupImpl(plan) {
     const result = await executeCleanup(plan);
     if (!result.ok) return result;
     await refreshCatalog();

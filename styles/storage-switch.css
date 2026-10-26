@@ -1,0 +1,25 @@
+#boxed-lllllabc-transfer-dialog {
+  box-sizing: border-box;
+  width: min(36rem, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  padding: 1.25rem;
+  color: var(--SmartThemeBodyColor, #ddd);
+  background: var(--SmartThemeBlurTintColor, #222);
+  border: 1px solid var(--SmartThemeBorderColor, #777);
+  border-radius: 0.75rem;
+  font: inherit;
+}
+#boxed-lllllabc-transfer-dialog::backdrop { background: rgb(0 0 0 / 75%); }
+#boxed-lllllabc-transfer-dialog p { white-space: pre-wrap; }
+#boxed-lllllabc-transfer-dialog label { display: flex; gap: 0.65rem; margin-block: 1rem; align-items: start; }
+#boxed-lllllabc-transfer-dialog .menu_button,
+#boxed-lllllabc-settings .boxed-lllllabc-storage-mode .menu_button {
+  display: inline-flex;
+  width: auto;
+  min-height: 2.25rem;
+  white-space: normal;
+  margin-inline-end: 0.5rem;
+}
+#boxed-lllllabc-settings .boxed-lllllabc-storage-mode { padding-block: 0.5rem; }
+#boxed-lllllabc-settings .boxed-lllllabc-storage-mode p { overflow-wrap: anywhere; }
