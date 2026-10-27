@@ -22,7 +22,7 @@ export function createStorageControl({ indexedDB = globalThis.indexedDB } = {}) 
           try {
             const current = read.result ?? structuredClone(DEFAULT);
             if (!["indexeddb", "sqlite"].includes(current.active)) throw new Error("活动存储记录无效，不能自动选择数据库。");
-            if (current.previous !== null && (!["indexeddb", "sqlite"].includes(current.previous) || current.previous === current.active) || current.lastTransfer !== null && (typeof current.lastTransfer !== "string" || !/^[a-zA-Z0-9_-]{8,80}$/.test(current.lastTransfer))) throw new Error("旧端确认记录无效，请保留两端数据。");
+            if (current.previous !== null && (!["indexeddb", "sqlite"].includes(current.previous) || current.previous === current.active) || current.lastTransfer !== null && (typeof current.lastTransfer !== "string" || !/^[a-zA-Z0-9_-]{8,80}$/.test(current.lastTransfer))) throw new Error("原存储位置的确认记录无效，请保留两个位置的备份。");
             const journal = current.journal;
             if (journal && (!/^[a-zA-Z0-9_-]{8,80}$/.test(journal.id) || !["switch", "clear"].includes(journal.kind) || !["working", "activated"].includes(journal.phase) || !["indexeddb", "sqlite"].includes(journal.from) || !["indexeddb", "sqlite"].includes(journal.to) || journal.from === journal.to || current.active !== (journal.phase === "activated" && journal.kind === "switch" ? journal.to : journal.from))) throw new Error("存储恢复记录无效，请保留两端数据。");
             value = update ? update(current) : current;

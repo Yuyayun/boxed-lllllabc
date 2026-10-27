@@ -60,7 +60,7 @@ export function createSnapshotController({ storage, getContextReader, runGuard =
     }),
     async restore(preview, { confirmed = false } = {}) {
       return guarded(async () => {
-        if (!confirmed || !preview) throw new Error("请预览并确认覆盖当前目标聊天。");
+        if (!confirmed || !preview) throw new Error("请预览并确认覆盖当前聊天。");
         ensureStopped();
         try {
           await beforeRestore();
@@ -101,7 +101,7 @@ export function createSnapshotController({ storage, getContextReader, runGuard =
               },
               save: ({ current: target }) => waitForSave({ save: () => {
                 const latest = current();
-                if (!latest.ok || latest.identity.chatKey !== preview.plan.chatKey || stableText([latest.chat, latest.context.chatMetadata ?? {}]) !== stableText([snapshot.chat, metadata])) throw new Error("保存前目标聊天已变化，已停止请求保存。");
+                if (!latest.ok || latest.identity.chatKey !== preview.plan.chatKey || stableText([latest.chat, latest.context.chatMetadata ?? {}]) !== stableText([snapshot.chat, metadata])) throw new Error("保存前目标聊天已变化，已停止请求酒馆保存。");
                 return target.context.saveChat();
               } }),
             });

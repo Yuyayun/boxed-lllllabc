@@ -48,7 +48,7 @@ test("恢复中心标记可执行的 pending、recent、full 和历史恢复", (
 });
 
 test("备份关闭时恢复中心仍可查看但所有恢复动作解释为需先启用", () => {
-  const reason = "请先启用本地备份，再执行恢复或请求保存。";
+  const reason = "请先启用备份，再执行恢复或请求保存。";
   const model = buildRecoveryCenterModel({
     pendingPlan: { totalCount: 1, blockedReason: "" },
     pendingCount: 1,

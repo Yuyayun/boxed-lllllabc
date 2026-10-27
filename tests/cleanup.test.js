@@ -24,7 +24,7 @@ test("单聊天清理只开放最近、历史和未冻结完整备份", () => {
   assert.equal(plans.historical.canConfirm, true);
   assert.equal(plans.pending.canConfirm, false);
   assert.match(plans.pending.blockedReason, /禁止.*直接清理/);
-  assert.match(plans.recent.notice, /不会删除或修改 SillyTavern 聊天文件/);
+  assert.match(plans.recent.notice, /不会删除或修改酒馆聊天文件/);
 });
 
 test("冻结完整备份和空备份类型明确禁止清理", () => {
@@ -39,7 +39,7 @@ test("冻结完整备份和空备份类型明确禁止清理", () => {
   });
 
   assert.equal(fullPlan.canConfirm, false);
-  assert.match(fullPlan.blockedReason, /冻结保护/);
+  assert.match(fullPlan.blockedReason, /已暂停更新并保留/);
   assert.match(fullPlan.blockedReason, /当前聊天备份.*确认当前内容无误/);
   assert.equal(emptyHistorical.canConfirm, false);
   assert.match(emptyHistorical.blockedReason, /当前没有历史楼层改动备份/);
@@ -51,7 +51,7 @@ test("等待后端确认的完整备份暂时禁止清理", () => {
 
   assert.equal(awaiting.isAwaitingConfirmation, true);
   assert.equal(plan.canConfirm, false);
-  assert.match(plan.blockedReason, /等待后端确认/);
+  assert.match(plan.blockedReason, /等待酒馆保存确认/);
 });
 
 test("清理预览后目标记录变化会拒绝旧计划", () => {
@@ -125,12 +125,12 @@ test("完整备份在确认前进入冻结状态时数据库事务拒绝删除",
       type: "full",
       expectedFingerprint: fingerprintBackupRecords(records),
     }),
-    /冻结保护状态/,
+    /已暂停更新并保留/,
   );
   assert.deepEqual(state.deletedKeys, []);
 });
 
-test("完整备份等待后端确认时数据库事务拒绝删除", async () => {
+test("完整备份待酒馆确认时数据库事务拒绝删除", async () => {
   const records = [record(0), record(1)];
   const { db, state } = createCleanupDatabase({
     records,
@@ -144,7 +144,7 @@ test("完整备份等待后端确认时数据库事务拒绝删除", async () =>
       type: "full",
       expectedFingerprint: fingerprintBackupRecords(records),
     }),
-    /等待后端确认/,
+    /等待酒馆保存确认/,
   );
   assert.deepEqual(state.deletedKeys, []);
 });

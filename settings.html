@@ -45,23 +45,34 @@
         </section>
 
         <section class="boxed-lllllabc-settings-group" data-settings-group="storage" aria-labelledby="boxed-lllllabc-group-storage">
-          <h4 id="boxed-lllllabc-group-storage">存储方式与状态</h4>
-          <p>当前活动端：<span id="boxed-lllllabc-storage-mode">正在读取</span></p>
-          <p class="boxed-lllllabc-settings-help">后端可选；安装或检查连接不会切换存储方式，也不会迁移。</p>
-          <p id="boxed-lllllabc-sqlite-state" role="status">正在检查可选后端</p>
-          <button id="boxed-lllllabc-check-storage" class="menu_button boxed-lllllabc-action-button" type="button">检查 SQLite 连接</button>
-          <button id="boxed-lllllabc-switch-storage" class="menu_button boxed-lllllabc-action-button" type="button" disabled>切换存储方式</button>
+          <h4 id="boxed-lllllabc-group-storage">备份存放位置</h4>
+          <p class="boxed-lllllabc-current-location">当前使用：<strong id="boxed-lllllabc-storage-mode">正在读取</strong></p>
+          <dl class="boxed-lllllabc-storage-locations">
+            <div>
+              <dt><strong>浏览器本地存储</strong><small>IndexedDB</small></dt>
+              <dd>备份保存在当前浏览器中，不会自动同步到服务器。</dd>
+            </div>
+            <div>
+              <dt><strong>服务器存储</strong><small>SQLite</small></dt>
+              <dd>可将备份保存在酒馆服务器的独立数据库中。</dd>
+            </div>
+          </dl>
+          <p class="boxed-lllllabc-settings-help">服务器备份插件可选。安装或检查连接不会切换备份位置，也不会自动迁移。</p>
+          <p id="boxed-lllllabc-sqlite-state" role="status">正在检查服务器备份插件连接</p>
+          <p id="boxed-lllllabc-sqlite-detail" class="boxed-lllllabc-settings-help" hidden></p>
+          <button id="boxed-lllllabc-check-storage" class="menu_button boxed-lllllabc-action-button" type="button">检查服务器连接</button>
+          <button id="boxed-lllllabc-switch-storage" class="menu_button boxed-lllllabc-action-button" type="button" disabled>切换备份位置</button>
           <p id="boxed-lllllabc-transfer-result" role="status"></p>
         <div class="boxed-lllllabc-storage-overview" aria-labelledby="boxed-lllllabc-storage-title">
           <div class="boxed-lllllabc-storage-heading">
-            <strong id="boxed-lllllabc-storage-title">IndexedDB 存储状态</strong>
+            <strong id="boxed-lllllabc-storage-title">浏览器本地存储状态</strong>
             <span id="boxed-lllllabc-storage-state" data-tone="unavailable" role="status">正在读取</span>
           </div>
-          <p id="boxed-lllllabc-storage-help" class="boxed-lllllabc-storage-help">备份只保存在当前酒馆地址；各项统计方式不同，数值可能不完全对应。</p>
+          <p id="boxed-lllllabc-storage-help" class="boxed-lllllabc-storage-help">正在读取当前备份位置的空间统计。</p>
           <dl class="boxed-lllllabc-storage-metrics">
-            <div><dt>备份内容大小（估算）</dt><dd id="boxed-lllllabc-storage-extension">正在计算</dd></div>
-            <div><dt id="boxed-lllllabc-storage-site-label">当前酒馆已使用</dt><dd id="boxed-lllllabc-storage-site">正在读取</dd></div>
-            <div><dt id="boxed-lllllabc-storage-remaining-label">当前酒馆还可使用</dt><dd id="boxed-lllllabc-storage-remaining">正在读取</dd></div>
+            <div><dt>备份占用（估算）</dt><dd id="boxed-lllllabc-storage-extension">正在计算</dd></div>
+            <div><dt id="boxed-lllllabc-storage-site-label">当前酒馆站点的浏览器占用</dt><dd id="boxed-lllllabc-storage-site">正在读取</dd></div>
+            <div><dt id="boxed-lllllabc-storage-remaining-label">当前酒馆站点的浏览器可用（估算）</dt><dd id="boxed-lllllabc-storage-remaining">正在读取</dd></div>
           </dl>
           <p id="boxed-lllllabc-storage-issue" class="boxed-lllllabc-storage-issue" hidden></p>
         </div>
@@ -72,7 +83,7 @@
           <h4 id="boxed-lllllabc-group-backup">备份开关</h4>
         <label class="boxed-lllllabc-row">
           <span>
-            <strong>启用本地备份</strong>
+            <strong>启用备份</strong>
             <small>关闭后不会写入未保存变更、最近楼层备份，也不会核对酒馆保存状态。</small>
           </span>
           <input id="boxed-lllllabc-enabled" type="checkbox" />
@@ -97,7 +108,7 @@
         <label class="boxed-lllllabc-row">
           <span>
             <strong>启用历史楼层改动备份</strong>
-            <small>保护最近备份范围以外的楼层改动，后端确认后仍会保留。</small>
+            <small>保护最近备份范围以外的楼层改动，确认酒馆聊天文件已保存后仍会保留。</small>
           </span>
           <input id="boxed-lllllabc-historical-enabled" type="checkbox" />
         </label>
@@ -151,11 +162,11 @@
 
         <section class="boxed-lllllabc-settings-group" data-settings-group="management" aria-labelledby="boxed-lllllabc-group-management">
           <h4 id="boxed-lllllabc-group-management">备份管理</h4>
-          <p class="boxed-lllllabc-settings-help">“立即核对后端”检查酒馆原生聊天是否保存，与 SQLite 连接检查不同。</p>
+          <p class="boxed-lllllabc-settings-help">“检查保存状态”只检查酒馆聊天文件是否保存，不会检查服务器备份插件连接。</p>
         <div class="boxed-lllllabc-actions">
           <button id="boxed-lllllabc-refresh" class="menu_button boxed-lllllabc-action-button" type="button">
             <i class="fa-solid fa-rotate" aria-hidden="true"></i>
-            <span data-boxed-lllllabc-button-label>立即核对后端</span>
+            <span data-boxed-lllllabc-button-label>检查保存状态</span>
           </button>
           <button id="boxed-lllllabc-toggle-panel" class="menu_button boxed-lllllabc-action-button" type="button">
             <i class="fa-solid fa-box-archive" aria-hidden="true"></i>
@@ -174,9 +185,9 @@
         </section>
 
         <section class="boxed-lllllabc-settings-group" data-settings-group="inactive" aria-labelledby="boxed-lllllabc-group-inactive">
-          <h4 id="boxed-lllllabc-group-inactive">旧端数据管理</h4>
-          <p id="boxed-lllllabc-clear-help" class="boxed-lllllabc-settings-help">完成存储切换后，才可清空保留的旧端数据。</p>
-          <button id="boxed-lllllabc-clear-inactive" class="menu_button boxed-lllllabc-action-button" type="button" aria-describedby="boxed-lllllabc-clear-help" disabled>清空旧端数据</button>
+          <h4 id="boxed-lllllabc-group-inactive">原存储位置的数据管理</h4>
+          <p id="boxed-lllllabc-clear-help" class="boxed-lllllabc-settings-help">切换备份位置后，才可清空原存储位置保留的备份。</p>
+          <button id="boxed-lllllabc-clear-inactive" class="menu_button boxed-lllllabc-action-button" type="button" aria-describedby="boxed-lllllabc-clear-help" disabled>清空原位置的备份</button>
           <p id="boxed-lllllabc-clear-result" role="status"></p>
         </section>
 

@@ -173,7 +173,7 @@ export function confirmExtensionUpdate() {
     const body = document.createElement("div");
     body.className = "boxed-lllllabc-update-body";
     const message = document.createElement("p");
-    message.textContent = "酒馆已经检测到远程仓库有新版本。更新由 SillyTavern 扩展管理接口执行，不会修改聊天或本地备份。";
+    message.textContent = "酒馆已经检测到远程仓库有新版本。更新由 SillyTavern 扩展管理接口执行，不会修改酒馆聊天文件或备份。";
     const detail = document.createElement("p");
     detail.textContent = "更新完成后酒馆会自动刷新。请先等待当前回复生成结束，并完成手头操作。";
     body.append(message, detail);

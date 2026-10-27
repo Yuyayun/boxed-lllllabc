@@ -122,7 +122,7 @@ export function createBackendVerifier({
   async function runPendingVerification({ chatKey, retryIndex, runId }) {
     const settings = getSettings();
     if (!settings.enabled) {
-      const status = createDisplayStatus("disabled", "未启用");
+      const status = createDisplayStatus("disabled", "备份未启用");
       return publishStatus(runId, { status, refresh: true });
     }
 
@@ -141,7 +141,7 @@ export function createBackendVerifier({
         return latestStatus();
       }
       if (!needsConfirmation) {
-        const requestedStatus = createDisplayStatus("saved", "酒馆已保存聊天记录");
+        const requestedStatus = createDisplayStatus("saved", "酒馆聊天已保存");
         const status = await prioritizeFullBackupStatus(chatKey, requestedStatus);
         return publishStatus(runId, {
           status,
@@ -159,7 +159,7 @@ export function createBackendVerifier({
 
     const checking = await prioritizeFullBackupStatus(
       chatKey,
-      createDisplayStatus("checking", "正在核对后端", "", pending),
+      createDisplayStatus("checking", "正在检查保存状态", "", pending),
     );
     await publishStatus(runId, { status: checking });
     if (!isCurrentRun(runId)) {
@@ -227,7 +227,7 @@ export function createBackendVerifier({
             return publishStatus(runId, { status: confirmation.value, refresh: true });
           }
         }
-        const requestedStatus = createDisplayStatus("saved", "酒馆已保存聊天记录");
+        const requestedStatus = createDisplayStatus("saved", "酒馆聊天已保存");
         const status = await prioritizeFullBackupStatus(chatKey, requestedStatus);
         return publishStatus(runId, {
           status,
@@ -240,7 +240,7 @@ export function createBackendVerifier({
         chatKey,
         pending: latestPending,
         retryIndex,
-        detail: "后端内容尚未与当前聊天完全一致。",
+        detail: "酒馆聊天文件内容尚未与当前聊天完全一致。",
         outcome: "unconfirmed",
         runId,
       });
@@ -263,7 +263,7 @@ export function createBackendVerifier({
   async function runSnapshotVerification({ chatKey, expectedChatHash, retryIndex, runId }) {
     const settings = getSettings();
     if (!settings.enabled) {
-      const status = createDisplayStatus("disabled", "未启用");
+      const status = createDisplayStatus("disabled", "备份未启用");
       return publishStatus(runId, { status, refresh: true });
     }
 
@@ -275,8 +275,8 @@ export function createBackendVerifier({
     if (hashCanonicalChat(current.chat) !== expectedChatHash) {
       const status = createDisplayStatus(
         "unconfirmed",
-        "等待确认保存情况",
-        "请求保存后当前聊天又发生了变化，请重新请求保存。",
+        "酒馆保存待确认",
+        "请求酒馆保存后当前聊天又发生了变化，请重新请求酒馆保存。",
       );
       return publishStatus(runId, {
         status,
@@ -286,7 +286,7 @@ export function createBackendVerifier({
     }
 
     await publishStatus(runId, {
-      status: createDisplayStatus("checking", "正在核对后端"),
+      status: createDisplayStatus("checking", "正在检查保存状态"),
     });
     if (!isCurrentRun(runId)) {
       return latestStatus();
@@ -304,7 +304,7 @@ export function createBackendVerifier({
           || hashCanonicalChat(latestCurrent.chat) !== expectedChatHash) {
           const status = createDisplayStatus(
             "unconfirmed",
-            "等待确认保存情况",
+            "酒馆保存待确认",
             "核对期间当前聊天又发生了变化，请等待下一次核对。",
           );
           return publishStatus(runId, {
@@ -323,7 +323,7 @@ export function createBackendVerifier({
         if (confirmation.value?.code === "db-error") {
           return publishStatus(runId, { status: confirmation.value, refresh: true });
         }
-        const requestedStatus = createDisplayStatus("saved", "酒馆已保存聊天记录");
+        const requestedStatus = createDisplayStatus("saved", "酒馆聊天已保存");
         const status = await prioritizeFullBackupStatus(chatKey, requestedStatus);
         return publishStatus(runId, {
           status,
@@ -332,7 +332,7 @@ export function createBackendVerifier({
         });
       }
 
-      const detail = backend.ok ? "后端内容尚未与当前聊天一致。" : backend.reason;
+      const detail = backend.ok ? "酒馆聊天文件内容尚未与当前聊天一致。" : backend.reason;
       return handleSnapshotVerificationPending({
         chatKey,
         expectedChatHash,
@@ -368,7 +368,7 @@ export function createBackendVerifier({
       return latestStatus();
     }
     if (retryIndex < retryDelays.length) {
-      const status = createDisplayStatus("checking", "正在核对后端", detail);
+      const status = createDisplayStatus("checking", "正在检查保存状态", detail);
       await publishStatus(runId, {
         status,
         meta: { chatKey, outcome: "checking", pending: [] },
@@ -386,8 +386,8 @@ export function createBackendVerifier({
     }
 
     const status = outcome === "unavailable"
-      ? createDisplayStatus("verify-unavailable", "无法核对后端", detail)
-      : createDisplayStatus("unconfirmed", "等待确认保存情况", detail);
+      ? createDisplayStatus("verify-unavailable", "无法确认保存状态", detail)
+      : createDisplayStatus("unconfirmed", "酒馆保存待确认", detail);
     return publishStatus(runId, {
       status,
       meta: { chatKey, outcome, pending: [] },
@@ -407,7 +407,7 @@ export function createBackendVerifier({
       return latestStatus();
     }
     if (retryIndex < retryDelays.length) {
-      const requestedStatus = createDisplayStatus("checking", "正在核对后端", detail, pending);
+      const requestedStatus = createDisplayStatus("checking", "正在检查保存状态", detail, pending);
       const status = await prioritizeFullBackupStatus(chatKey, requestedStatus);
       await publishStatus(runId, {
         status,
@@ -425,8 +425,8 @@ export function createBackendVerifier({
     }
 
     const requestedStatus = outcome === "unavailable"
-      ? createDisplayStatus("verify-unavailable", "无法核对后端", detail, pending)
-      : createDisplayStatus("unconfirmed", "等待确认保存情况", detail, pending);
+      ? createDisplayStatus("verify-unavailable", "无法确认保存状态", detail, pending)
+      : createDisplayStatus("unconfirmed", "酒馆保存待确认", detail, pending);
     const status = await prioritizeFullBackupStatus(chatKey, requestedStatus);
     return publishStatus(runId, {
       status,

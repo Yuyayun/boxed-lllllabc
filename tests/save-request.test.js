@@ -50,7 +50,7 @@ test("重新保存计划拒绝确认期间发生的聊天变化", () => {
   assert.match(validation.reason, /聊天内容已经变化/);
 });
 
-test("重新请求保存只调用一次 saveChat 并等待后端核对", async () => {
+test("重新请求酒馆保存只调用一次 saveChat 并等待后端核对", async () => {
   const chat = makeChat();
   const pending = [makePending(1, "第二层")];
   const plan = createSaveRequestPlan({ chat, chatKey, pending });
@@ -83,7 +83,7 @@ test("重新请求保存只调用一次 saveChat 并等待后端核对", async (
   ]);
 });
 
-test("重新请求保存抛错时保留 pending 且不安排成功核对", async () => {
+test("重新请求酒馆保存抛错时保留 pending 且不安排成功核对", async () => {
   const chat = makeChat();
   const pending = [makePending(1, "第二层")];
   const plan = createSaveRequestPlan({ chat, chatKey, pending });
@@ -159,20 +159,20 @@ test("保存等待器超时后会吸收原请求稍后的拒绝", async () => {
   assert.equal(result.status, "timeout");
 });
 
-test("重新请求保存确认模型使用中文说明 pending 范围", () => {
+test("重新请求酒馆保存确认模型使用中文说明 pending 范围", () => {
   const pending = [makePending(1, "第二层"), makePending(2, "第三层")];
   const model = buildSaveRequestDialogModel({
     chatName: "专用测试聊天",
     pending,
   });
 
-  assert.equal(model.title, "重新请求保存");
+  assert.equal(model.title, "重新请求酒馆保存");
   assert.equal(model.chatName, "专用测试聊天");
   assert.equal(model.pendingCount, 2);
   assert.equal(model.pendingRange, "已备份第 1 层到第 2 层");
 });
 
-test("没有 pending 时仍提供请求保存并安排整聊后端核对", async () => {
+test("没有 pending 时仍提供请求酒馆保存并安排整聊后端核对", async () => {
   const chat = makeChat();
   const plan = createSaveRequestPlan({ chat, chatKey, pending: [] });
   const calls = [];
@@ -200,11 +200,11 @@ test("没有 pending 时仍提供请求保存并安排整聊后端核对", async
 test("没有 pending 时保存确认模型明确说明整聊核对", () => {
   const model = buildSaveRequestDialogModel({ chatName: "测试聊天", pending: [] });
 
-  assert.equal(model.title, "请求保存当前聊天");
+  assert.equal(model.title, "请求酒馆保存当前聊天");
   assert.equal(model.pendingCount, 0);
   assert.equal(model.pendingRange, "当前没有待确认变更");
   assert.equal(model.hasPending, false);
-  assert.match(model.explanation, /整聊内容核对后端/);
+  assert.match(model.explanation, /酒馆聊天文件是否与当前完整聊天一致/);
 });
 
 test("恢复界面状态在正常已保存时仍暴露保存和恢复入口", () => {

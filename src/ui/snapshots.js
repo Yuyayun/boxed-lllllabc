@@ -47,7 +47,7 @@ export function createSnapshotUi({ controller, onChanged = async () => {} }) {
     button("取消", close);
     button("确认创建", () => perform(async () => {
       const result = await controller.create({ name: input.value.trim() || undefined });
-      message(`聊天快照「${result.header.name}」已保存并读回校验，共 ${result.header.messageCount} 层。`);
+      message(`聊天快照「${result.header.name}」已保存并完成校验，共 ${result.header.messageCount} 层。`);
       await onChanged();
     }));
     input.focus(); input.select();
@@ -101,8 +101,8 @@ export function createSnapshotUi({ controller, onChanged = async () => {} }) {
   }
   function confirmRestore(result) {
     frame("确认恢复聊天快照");
-    body.append(element("p", `来源快照：${result.snapshot.header.name}`), element("p", `当前目标聊天：${chatName(result.meta)}。将覆盖当前聊天的完整内容和可恢复元数据，共 ${result.snapshot.chat.length} 层；当前未保存改动将被替换，原生聊天身份保持不变。源快照仍然保留。`));
-    const label = element("label"), check = element("input"); check.type = "checkbox"; label.append(check, element("span", "我确认覆盖当前目标聊天内容。")); body.append(label);
+    body.append(element("p", `来源快照：${result.snapshot.header.name}`), element("p", `当前聊天：${chatName(result.meta)}。将覆盖当前聊天的完整内容和可恢复元数据，共 ${result.snapshot.chat.length} 层；当前未保存改动将被替换，原生聊天身份保持不变。源快照仍然保留。`));
+    const label = element("label"), check = element("input"); check.type = "checkbox"; label.append(check, element("span", "我确认覆盖当前聊天内容。")); body.append(label);
     button("取消", () => preview(result.snapshot.header.id));
     const submit = button("确认覆盖并恢复", () => perform(async () => {
       const restored = await controller.restore(result.restore, { confirmed: true }); message(restored.reason || "本次恢复未完成。"); await onChanged();

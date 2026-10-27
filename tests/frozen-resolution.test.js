@@ -169,7 +169,7 @@ test("冻结处理弹窗使用两步确认、明确动作和手机触控尺寸",
   assert.match(source, /我已检查当前聊天，确认现在显示的内容是正确的/);
   assert.match(source, /采用当前聊天并恢复更新/);
   assert.match(source, /删除冻结完整备份/);
-  assert.match(source, /不会发送、修改、删除或恢复 SillyTavern 聊天/);
+  assert.match(source, /当前备份位置中的完整备份，不会修改酒馆聊天文件/);
   assert.match(panelSource, /确认当前聊天无误/);
   assert.match(panelSource, /meta\.fullBackupState === "frozen"/);
   assert.match(controllerSource, /createFrozenFullBackupResolutionPlan/);

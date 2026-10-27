@@ -14,17 +14,17 @@ export function createSqliteStorage({ fetchImpl = globalThis.fetch, getRequestHe
         headers: { ...getRequestHeaders(), "Content-Type": "application/json" },
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
-      if (response.status === 404) return { ok: false, code: "unavailable", reason: "SQLite 插件未安装、未启用或不可连接。" };
+      if (response.status === 404) return { ok: false, code: "unavailable", reason: "服务器备份插件未安装、未启用或不可连接。" };
       let data;
       try { data = await response.json(); }
       catch (error) {
         // Aborting the response body can happen after a write has committed.
         if (error.name === "AbortError" || error.name === "TimeoutError") throw error;
         throw Object.assign(new Error(response.status === 403
-          ? "酒馆拒绝了 SQLite 请求，请检查登录状态与 CSRF 保护。"
-          : "SQLite 插件未返回兼容的协议响应，请检查安装及版本。"), { code: response.status === 403 ? "permission-denied" : "unavailable" });
+          ? "酒馆拒绝了服务器备份请求，请检查登录状态与 CSRF 保护。"
+          : "服务器备份插件未返回兼容的响应，请检查安装及版本。"), { code: response.status === 403 ? "permission-denied" : "unavailable" });
       }
-      if (data.protocol !== STORAGE_PROTOCOL) throw Object.assign(new Error("SQLite 插件协议不兼容，请检查前后端版本。"), { code: "protocol-incompatible" });
+      if (data.protocol !== STORAGE_PROTOCOL) throw Object.assign(new Error("服务器备份插件协议不兼容，请检查前端扩展与插件版本。"), { code: "protocol-incompatible" });
       if (!response.ok || data.ok === false) throw Object.assign(new Error(data.reason || "SQLite 操作失败。"), { code: data.code || "database-error" });
       return data;
     } finally {

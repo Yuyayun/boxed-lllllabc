@@ -81,7 +81,7 @@ export async function executeRestorePlan({
   try {
     await render({ current, plan });
   } catch (error) {
-    return failure("render", "聊天已经恢复，但界面更新失败。请先核对后端状态再刷新页面。", error, true);
+    return failure("render", "聊天已经恢复，但界面更新失败。请先核对酒馆保存状态再刷新页面。", error, true);
   }
 
   let saveOutcome;

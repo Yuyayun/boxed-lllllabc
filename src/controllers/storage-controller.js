@@ -28,7 +28,7 @@ export function createStorageController({
       }
       if (storage.getMode?.() === "sqlite") {
         const status = await storage.status();
-        if (!status?.ok) throw new Error(status?.reason || "SQLite 状态不可用。");
+        if (!status?.ok) throw new Error(status?.reason || "服务器存储状态不可用。");
         const database = status.database ?? {};
         const contentBytes = Array.isArray(database.counts) && database.counts.every(row => Number.isFinite(row.bytes) && row.bytes >= 0)
           ? database.counts.reduce((sum, row) => sum + row.bytes, 0) : null;
@@ -55,7 +55,7 @@ export function createStorageController({
     } catch (error) {
       const sqlite = storage.getMode?.() === "sqlite";
       latestSnapshot = createStorageSnapshot({
-        failure: sqlite ? { type: "database", shortText: "SQLite 存储不可用", detail: error.message || "请检查可选服务器插件的连接与权限；没有回退到 IndexedDB。" } : describeStorageFailure(error),
+        failure: sqlite ? { type: "database", shortText: "服务器存储不可用", detail: error.message || "请检查可选服务器插件的连接与权限；未改用浏览器本地存储。" } : describeStorageFailure(error),
         estimate: storage.getMode?.() === "sqlite" ? {} : await estimateStorage(),
       });
       latestSnapshot.mode = storage.getMode?.();
@@ -70,7 +70,7 @@ export function createStorageController({
   function handleBackupStatus(status) {
     if (status?.code !== "db-error") return;
     const failure = storage.getMode?.() === "sqlite"
-      ? { type: "database", shortText: "SQLite 存储操作失败", detail: status.detail || "本次 SQLite 操作失败，请检查服务器连接与权限。" }
+      ? { type: "database", shortText: "服务器存储操作失败", detail: status.detail || "本次服务器存储操作失败，请检查服务器连接与权限。" }
       : describeStorageFailure(status);
     latestSnapshot = { ...latestSnapshot, mode: storage.getMode?.(), failure, pressure: "error", checkedAt: new Date().toISOString() };
     renderOverview?.(latestSnapshot);

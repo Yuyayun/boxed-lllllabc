@@ -63,7 +63,7 @@ test("配额写入失败使用明确中文说明", () => {
   error.name = "QuotaExceededError";
   assert.deepEqual(describeStorageFailure(error), {
     type: "quota",
-    shortText: "本地空间不足，备份未写入",
+    shortText: "空间不足，备份未写入",
     detail: "浏览器报告本地存储空间不足。本次备份没有写入成功，已有备份没有被自动删除。",
   });
 });

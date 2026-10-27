@@ -81,7 +81,7 @@ export function openFrozenBackupDialog({
     appendImpact(impact, "检测时间", model.detectedAt);
     const safety = document.createElement("p");
     safety.className = "boxed-lllllabc-cleanup-regeneration";
-    safety.textContent = "这里的操作只处理扩展保存在当前浏览器中的完整备份，不会发送、修改、删除或恢复 SillyTavern 聊天。";
+    safety.textContent = "这里只处理当前备份位置中的完整备份，不会修改酒馆聊天文件。";
     const footer = document.createElement("footer");
     footer.className = "boxed-lllllabc-cleanup-footer";
     const cancel = createTextButton("fa-xmark", "暂不处理", closeFrozenBackupDialog);

@@ -20,7 +20,7 @@ export async function readBackendChat({
   if (typeof fetchImpl !== "function") {
     return {
       ok: false,
-      reason: "当前浏览器无法请求后端。",
+      reason: "当前浏览器无法读取酒馆聊天文件。",
     };
   }
 
@@ -82,7 +82,7 @@ export async function readBackendChat({
     if (!response.ok) {
       return {
         ok: false,
-        reason: "后端读取失败。",
+        reason: "酒馆聊天文件读取失败。",
         status: response.status,
       };
     }
@@ -97,7 +97,7 @@ export async function readBackendChat({
     if (!Array.isArray(chat)) {
       return {
         ok: false,
-        reason: "后端返回的聊天格式不可用。",
+        reason: "酒馆聊天文件的格式不可用。",
       };
     }
 
@@ -169,7 +169,7 @@ function timeoutResult() {
   return {
     ok: false,
     code: "timeout",
-    reason: "后端读取超过 15 秒，已停止等待。",
+    reason: "酒馆聊天文件读取超过 15 秒，已停止等待。",
   };
 }
 

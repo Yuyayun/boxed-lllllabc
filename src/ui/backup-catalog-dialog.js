@@ -37,7 +37,7 @@ export function openBackupCatalogDialog({ onRefresh, onOpenCleanup, onPreviewBat
   heading.className = "boxed-lllllabc-catalog-heading";
   const kicker = document.createElement("span");
   kicker.className = "boxed-lllllabc-catalog-kicker";
-  kicker.textContent = "本地备份管理";
+  kicker.textContent = "备份管理";
   const title = document.createElement("strong");
   title.id = "boxed-lllllabc-catalog-title";
   title.textContent = "全部聊天备份";
@@ -108,7 +108,7 @@ export function renderBackupCatalogDialog({ catalog = null, loading = false, err
   if (containedFocus) body.closest(`#${CATALOG_DIALOG_ID}`).querySelector(".boxed-lllllabc-dialog-close")?.focus({ preventScroll: true });
 
   if (loading) {
-    body.append(renderState("fa-box-archive", "正在整理备份索引…", "会读取当前活动存储，不会访问或修改聊天文件。"));
+    body.append(renderState("fa-box-archive", "正在整理备份列表…", "会读取当前备份位置，不会访问或修改酒馆聊天文件。"));
     return;
   }
   if (error) {
@@ -116,13 +116,13 @@ export function renderBackupCatalogDialog({ catalog = null, loading = false, err
     return;
   }
   if (!latestCatalog) {
-    body.append(renderState("fa-box-open", "还没有全局备份数据", "打开聊天并启用备份后，这里会出现索引。"));
+    body.append(renderState("fa-box-open", "还没有聊天备份", "打开聊天并启用备份后，这里会显示备份列表。"));
     return;
   }
 
   body.append(renderCatalogSummary(latestCatalog));
   if (!latestCatalog.chatCount) {
-    body.append(renderState("fa-box-open", "还没有全局备份数据", "打开聊天并启用备份后，这里会出现索引。"));
+    body.append(renderState("fa-box-open", "还没有聊天备份", "打开聊天并启用备份后，这里会显示备份列表。"));
     return;
   }
 
@@ -223,7 +223,7 @@ function renderCatalogSummary(catalog) {
   if (catalog.frozenChatCount > 0) {
     const warning = document.createElement("div");
     warning.className = "boxed-lllllabc-catalog-summary-warning";
-    warning.textContent = `${catalog.frozenChatCount} 个聊天的完整备份处于保护冻结状态`;
+    warning.textContent = `${catalog.frozenChatCount} 个聊天的完整备份已暂停更新并保留`;
     summary.append(warning);
   }
   return summary;
@@ -278,9 +278,9 @@ function renderCatalogEntry(chat) {
   if (chat.isFrozen || chat.isAwaitingConfirmation || chat.pending.count) {
     const flags = document.createElement("div");
     flags.className = "boxed-lllllabc-catalog-flags";
-    if (chat.isFrozen) flags.append(renderFlag("完整备份已冻结保护", "danger"));
-    if (chat.isAwaitingConfirmation) flags.append(renderFlag("完整备份等待后端确认", "warning"));
-    if (chat.pending.count) flags.append(renderFlag(`${chat.pending.count} 条等待后端确认`, "warning"));
+    if (chat.isFrozen) flags.append(renderFlag("完整备份已暂停更新并保留", "danger"));
+    if (chat.isAwaitingConfirmation) flags.append(renderFlag("完整备份待酒馆确认", "warning"));
+    if (chat.pending.count) flags.append(renderFlag(`${chat.pending.count} 条改动等待酒馆保存确认`, "warning"));
     entry.append(flags);
   }
   if (typeof openCleanupHandler === "function") {

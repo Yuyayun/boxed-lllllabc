@@ -57,7 +57,7 @@ export function createRestoreController({
       chatKey: current.identity.chatKey,
       pending,
     });
-    const disabledReason = getSettings().enabled ? "" : "请先启用本地备份，再执行恢复或请求保存。";
+    const disabledReason = getSettings().enabled ? "" : "请先启用备份，再执行恢复或请求酒馆保存。";
 
     return {
       pendingPlan,
@@ -219,7 +219,7 @@ export function createRestoreController({
       if (restored.ok && restored.identity.chatKey === plan.chatKey) {
         await refreshBackupsAfterRestore({ current: restored, plan });
         const pending = await readCurrentPending(plan.chatKey);
-        setStatus(createDisplayStatus("checking", "正在核对后端", "", pending));
+        setStatus(createDisplayStatus("checking", "正在检查保存状态", "", pending));
         scheduleBackendVerification(plan.chatKey, getSettings().backendVerifyDelayMs, 0);
       }
       await refreshVisiblePanel();
@@ -258,14 +258,14 @@ export function createRestoreController({
       timeoutMs: saveRequestTimeoutMs,
     });
     if (!saveOutcome.ok) {
-      setStatus(createDisplayStatus("unconfirmed", "等待确认保存情况", saveOutcome.reason, pending));
+      setStatus(createDisplayStatus("unconfirmed", "酒馆保存待确认", saveOutcome.reason, pending));
       await refreshVisiblePanel();
-      globalThis.toastr?.error?.("重新请求保存失败，未保存变更仍会保留。", "箱装辣白菜");
+      globalThis.toastr?.error?.("重新请求酒馆保存失败，未保存变更仍会保留。", "箱装辣白菜");
       return { ok: false, reason: saveOutcome.reason };
     }
 
     const latestPending = await readCurrentPending(plan.chatKey);
-    setStatus(createDisplayStatus("checking", "正在核对后端", "", latestPending));
+    setStatus(createDisplayStatus("checking", "正在检查保存状态", "", latestPending));
     if (latestPending.length) {
       scheduleBackendVerification(plan.chatKey, getSettings().backendVerifyDelayMs, 0);
     } else {
@@ -281,7 +281,7 @@ export function createRestoreController({
     globalThis.toastr?.info?.(
       timedOut
         ? "酒馆仍在处理保存请求，已继续在后台核对。"
-        : "已请求保存，等待后端确认。",
+        : "已请求酒馆保存，正在检查结果。",
       "箱装辣白菜",
     );
     return { ok: true, reason: "", code: timedOut ? "save-timeout" : "save-requested" };

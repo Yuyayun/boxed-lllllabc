@@ -51,7 +51,7 @@ export function createBackupCoordinator({
     const settings = getSettings();
     if (!settings.enabled) {
       clearScheduledVerification();
-      const status = createDisplayStatus("disabled", "未启用");
+      const status = createDisplayStatus("disabled", "备份未启用");
       setStatus(status);
       await refreshVisiblePanel();
       return status;
@@ -108,7 +108,7 @@ export function createBackupCoordinator({
       }
     } catch (error) {
       console.error("[boxed-lllllabc] pending 写入失败", error);
-      const status = createBackupStatus("db-error", "本地备份不可用", error);
+      const status = createBackupStatus("db-error", "备份不可用", error);
       setStatus(status);
       await refreshVisiblePanel();
       return status;
@@ -145,10 +145,10 @@ export function createBackupCoordinator({
     const requestedStatus = fullStatus?.code === "full-frozen"
       ? fullStatus
       : fullStatus?.code === "full-awaiting-confirmation"
-        ? createDisplayStatus("checking", "正在核对后端", "正在确认其他扩展写入的聊天数据。", pending)
+        ? createDisplayStatus("checking", "正在检查保存状态", "正在确认其他扩展写入的聊天数据。", pending)
       : pending.length
-        ? createDisplayStatus("checking", "正在核对后端", "", pending)
-        : createDisplayStatus("saved", "酒馆已保存聊天记录");
+        ? createDisplayStatus("checking", "正在检查保存状态", "", pending)
+        : createDisplayStatus("saved", "酒馆聊天已保存");
     const status = await prioritizeFullBackupStatus(current.identity.chatKey, requestedStatus);
 
     setStatus(status);
@@ -215,7 +215,7 @@ export function createBackupCoordinator({
         if (decision.action === "skip-frozen") {
           return meta?.fullBackupIncident?.acknowledgedAt
             ? null
-            : createBackupStatus("full-frozen", "聊天内容疑似异常，完整备份已保留");
+            : createBackupStatus("full-frozen", "完整备份已暂停更新");
         }
 
         if (decision.action === "skip" || decision.action === "noop") {
@@ -236,7 +236,7 @@ export function createBackupCoordinator({
           }));
           return createBackupStatus(
             "full-awaiting-confirmation",
-            "完整备份等待后端确认",
+            "完整备份待酒馆确认",
             "检测到其他扩展更新了已有楼层，确认后会安全接续。",
           );
         }
@@ -255,7 +255,7 @@ export function createBackupCoordinator({
             incident,
           }));
           globalThis.toastr?.warning?.("聊天内容疑似异常缩短，完整备份已保留。", "箱装辣白菜");
-          return createBackupStatus("full-frozen", "聊天内容疑似异常，完整备份已保留");
+          return createBackupStatus("full-frozen", "完整备份已暂停更新");
         }
 
         const nextMeta = createFullBackupMeta({
@@ -283,7 +283,7 @@ export function createBackupCoordinator({
       }
     } catch (error) {
       console.error("[boxed-lllllabc] 完整聊天备份失败", error);
-      return createBackupStatus("db-error", "本地备份不可用", error);
+      return createBackupStatus("db-error", "备份不可用", error);
     }
   }
 
@@ -305,7 +305,7 @@ export function createBackupCoordinator({
         if (result.status === "conflict") {
           return createBackupStatus(
             "db-error",
-            "本地备份不可用",
+            "备份不可用",
             "聊天身份接续时发现目标键已有备份，已停止写入以避免覆盖。",
           );
         }
@@ -318,7 +318,7 @@ export function createBackupCoordinator({
       }
     } catch (error) {
       console.error("[boxed-lllllabc] 聊天身份接续失败", error);
-      return createBackupStatus("db-error", "本地备份不可用", error);
+      return createBackupStatus("db-error", "备份不可用", error);
     }
   }
 
@@ -396,7 +396,7 @@ export function createBackupCoordinator({
 
     const result = await migrateRenameIdentity(rename);
     if (result.status === "error") {
-      return createBackupStatus("db-error", "本地备份不可用", result.error);
+      return createBackupStatus("db-error", "备份不可用", result.error);
     }
     return null;
   }
@@ -456,7 +456,7 @@ export function createBackupCoordinator({
       }
     } catch (error) {
       console.error("[boxed-lllllabc] 历史楼层备份失败", error);
-      return createBackupStatus("db-error", "本地备份不可用", error);
+      return createBackupStatus("db-error", "备份不可用", error);
     }
   }
 
@@ -471,7 +471,7 @@ export function createBackupCoordinator({
       try {
         const meta = await session.getChatMeta(chatKey);
         return shouldPrioritizeFullBackupWarning({ meta, settings })
-          ? createBackupStatus("full-frozen", "聊天内容疑似异常，完整备份已保留")
+          ? createBackupStatus("full-frozen", "完整备份已暂停更新")
           : status;
       } finally {
         session.close();
@@ -528,7 +528,7 @@ export function createBackupCoordinator({
         session.close();
       }
     } catch (error) {
-      console.warn("[boxed-lllllabc] 后端状态摘要写入失败", error);
+      console.warn("[boxed-lllllabc] 酒馆保存状态摘要写入失败", error);
     }
   }
 

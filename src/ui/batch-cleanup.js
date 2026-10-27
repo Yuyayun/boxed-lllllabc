@@ -1,8 +1,9 @@
 import { formatStorageSize, groupCatalogChats } from "../backup/catalog.js";
+import { STORAGE_LOCATION_NAMES } from "./storage-location.js";
 
 const PREFIX = "boxed-lllllabc-batch";
 const TYPES = [["recent", "最近楼层"], ["full", "完整聊天"], ["historical", "历史改动"]];
-const RANGES = [["all", "清除全部备份"], ["owner", "清除单角色所有备份"],
+const RANGES = [["all", "清理所有聊天的普通备份"], ["owner", "清理单角色或群聊的普通备份"],
   ["owner-selected", "单角色内多选"], ["cross-selected", "跨角色多选"]];
 let activeDialog;
 
@@ -27,7 +28,7 @@ export function renderBatchCleanupSection({ catalog, onPreview, onExecute }) {
     types.append(label(input, text));
     return input;
   });
-  const note = element("p", { textContent: "只清理当前活动端的普通备份。未保存变更、冻结或等待确认的完整备份会跳过；聊天快照保留。备份开关不变，后续聊天可能重新生成备份。" });
+  const note = element("p", { textContent: "只清理当前备份位置中的普通记录。未保存变更、已暂停更新或等待酒馆保存确认的完整备份不会删除；聊天快照保留。备份开关不变，后续聊天可能重新生成备份。" });
   const actions = element("div", { className: `${PREFIX}-actions` });
   const preview = button("预览批量清理", () => openPreview({ selection: readSelection(), onPreview, onExecute }));
   const cancel = button("取消多选", () => { section.open = false; range.value = "all"; owner.value = "";
@@ -95,8 +96,8 @@ async function openPreview({ selection, onPreview, onExecute }) {
       const fresh = await onPreview(selection);
       if (!dialog.isConnected) return;
       plan = fresh;
-      body.replaceChildren(element("p", { textContent: `活动端：${plan.mode === "sqlite" ? "SQLite" : "IndexedDB"} · ${plan.chatCount} 个聊天 · 预计删除 ${plan.recordCount} 条 · 估算 ${formatStorageSize(plan.storageBytes)}` }),
-        element("p", { textContent: `保护跳过 ${plan.skipped.length} 项、${plan.protectedRecords} 条。项按“聊天 × 备份类型”统计。` }));
+      body.replaceChildren(element("p", { textContent: `备份位置：${STORAGE_LOCATION_NAMES[plan.mode]} · 范围：${RANGES.find(([range]) => range === plan.selection.range)?.[1] ?? "所选聊天"} · ${plan.chatCount} 个聊天 · 预计删除 ${plan.recordCount} 条 · 估算 ${formatStorageSize(plan.storageBytes)}` }),
+        element("p", { textContent: `受保护、不会删除：${plan.skipped.length} 项，共 ${plan.protectedRecords} 条。项按“聊天 × 备份类型”统计。` }));
       const entries = element("ul");
       for (const item of plan.actions) entries.append(element("li", { textContent: `清理：${item.ownerName} · ${item.chatName} · ${item.typeLabel} ${item.count} 条` }));
       for (const item of plan.skipped) entries.append(element("li", { textContent: `跳过：${item.ownerName} · ${item.chatName} · ${item.typeLabel} ${item.count} 条 — ${item.blockedReason}` }));

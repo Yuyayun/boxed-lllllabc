@@ -17,7 +17,7 @@ export function createManagedStorage({ control, adapters, locks = globalThis.nav
       if (!locks?.request) return openSession();
       return new Promise((resolve, reject) => {
         locks.request(STORAGE_LOCK, { mode: "shared", ifAvailable: true }, async (lock) => {
-          if (!lock) throw new Error("正在切换存储方式，请等待操作完成。");
+          if (!lock) throw new Error("正在切换备份位置，请等待操作完成。");
           let release;
           const done = new Promise((finish) => { release = finish; });
           const session = await openSession(release);
@@ -34,7 +34,7 @@ export function createOperationGate() {
   const waiters = [];
   return {
     async run(operation) {
-      if (paused) throw new Error("切换存储方式期间操作已锁定。");
+      if (paused) throw new Error("切换备份位置期间操作已锁定。");
       running += 1;
       try { return await operation(); }
       finally { if (--running === 0) waiters.splice(0).forEach((resolve) => resolve()); }

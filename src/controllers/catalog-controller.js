@@ -110,7 +110,7 @@ export function createCatalogController({
           if (confirmed !== true) throw new Error("批量清理必须先预览并明确确认。");
           session = await storage.open();
           mode = storage.getMode();
-          if (mode !== plan?.mode) throw Object.assign(new Error("活动存储已变化，请重新预览。"), { code: "stale-cleanup-plan" });
+          if (mode !== plan?.mode) throw Object.assign(new Error("当前备份位置已变化，请重新预览。"), { code: "stale-cleanup-plan" });
           submitted = true;
           // The port rechecks the whole scope inside the deletion transaction.
           return await session.deleteBackupBatch({ plan, confirmed: true });

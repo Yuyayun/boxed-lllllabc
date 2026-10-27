@@ -1,4 +1,5 @@
 import { formatStorageSize } from "../backup/catalog.js";
+import { STORAGE_LOCATION_NAMES } from "./storage-location.js";
 
 const WARNING_DIALOG_ID = "boxed-lllllabc-storage-warning-dialog";
 
@@ -32,11 +33,11 @@ export function createSettingsStoragePresentation(snapshot = {}) {
   if (snapshot.invalidRecordCount) messages.push(`已隔离 ${snapshot.invalidRecordCount} 条异常备份记录，没有自动删除。`);
   if (snapshot.failure?.detail) messages.push(snapshot.failure.detail);
   return {
-    title: sqlite ? "SQLite 存储状态" : "IndexedDB 存储状态",
-    siteLabel: sqlite ? "SQLite 文件占用（含日志）" : "当前酒馆来源已使用",
-    remainingLabel: sqlite ? "服务器磁盘可用" : "当前酒馆来源可用（估算）",
+    title: sqlite ? "服务器存储状态" : "浏览器本地存储状态",
+    siteLabel: sqlite ? "服务器数据库占用（含日志）" : "当前酒馆站点的浏览器占用",
+    remainingLabel: sqlite ? "服务器磁盘可用空间" : "当前酒馆站点的浏览器可用（估算）",
     help: sqlite ? "统计来自服务器 SQLite。磁盘可用是所在文件系统的空间，不是 SQLite 配额；文件大小与记录内容大小不同。"
-      : "内容为普通备份与已完成快照的估算；浏览器用量和可用空间属于整个酒馆来源，不能视为箱装独占空间。",
+      : "备份占用包括普通备份与已完成快照的估算；浏览器占用和可用估算属于整个酒馆站点，不能视为备份独占空间。",
     extensionText: snapshot.failure ? unavailable : bytes(snapshot.extensionBytes, unavailable),
     siteText: snapshot.failure ? unavailable : sqlite ? bytes(snapshot.databaseBytes, unavailable)
       : snapshot.estimate?.supported ? bytes(snapshot.estimate.usage, unavailable) : unavailable,
@@ -111,14 +112,14 @@ export function openStorageWarningDialog({ snapshot = {}, onManage } = {}) {
 }
 
 function storageStateText(snapshot) {
-  if (snapshot.loading) return `正在读取 ${snapshot.mode === "sqlite" ? "SQLite" : "IndexedDB"}`;
+  if (snapshot.loading) return `正在读取${STORAGE_LOCATION_NAMES[snapshot.mode] ?? STORAGE_LOCATION_NAMES.indexeddb}`;
   if (snapshot.failure) return snapshot.failure.shortText;
-  if (snapshot.mode === "sqlite") return snapshot.readable === true && snapshot.writable === true ? "SQLite 可读取、可写入"
-    : snapshot.readable === true && snapshot.writable === false ? "SQLite 可读取 · 不可写入" : "SQLite 读写状态未确认";
+  if (snapshot.mode === "sqlite") return snapshot.readable === true && snapshot.writable === true ? "服务器存储可读取、可写入"
+    : snapshot.readable === true && snapshot.writable === false ? "服务器存储可读取 · 暂时无法写入" : "服务器存储读写状态未确认";
   if (snapshot.checkedAt) {
-    if (snapshot.pressure === "critical") return "IndexedDB 可读取 · 空间非常紧张";
-    if (snapshot.pressure === "warning") return "IndexedDB 可读取 · 建议留意空间";
-    return snapshot.pressure === "normal" ? "IndexedDB 可读取 · 空间充足" : "IndexedDB 可读取 · 配额未提供";
+    if (snapshot.pressure === "critical") return "浏览器本地存储可读取 · 空间非常紧张";
+    if (snapshot.pressure === "warning") return "浏览器本地存储可读取 · 建议留意空间";
+    return snapshot.pressure === "normal" ? "浏览器本地存储可读取 · 空间充足" : "浏览器本地存储可读取 · 可用空间未提供";
   }
   return "正在读取";
 }

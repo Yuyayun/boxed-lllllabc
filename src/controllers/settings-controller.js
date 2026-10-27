@@ -67,7 +67,7 @@ export function createSettingsController({
         await getPanelController()?.refreshVisiblePanel();
         await refreshStorageOverview();
       } finally {
-        setActionButtonBusy(button, false, "立即核对后端");
+        setActionButtonBusy(button, false, "检查保存状态");
       }
     });
 

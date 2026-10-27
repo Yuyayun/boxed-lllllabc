@@ -1,4 +1,10 @@
-const names = { indexeddb: 'IndexedDB', sqlite: 'SQLite' };
+import { STORAGE_LOCATION_NAMES as names } from './storage-location.js';
+
+export function storageChangeDescription(kind, from, to) {
+  return kind === 'switch'
+    ? `将备份从“${names[from]}”切换到“${names[to]}”。新位置已有的备份会被覆盖，不会合并。切换成功后，原位置的备份仍会保留。`
+    : `将删除原存储位置“${names[to]}”中的普通备份、未保存变更和聊天快照，此操作不可撤销。当前使用位置“${names[from]}”的备份、备份设置及酒馆聊天文件不受影响。`;
+}
 export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerating = () => false, afterChange = async () => {} }) {
   let modal;
   let progressText;
@@ -15,7 +21,7 @@ export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerati
   }
   function button(label, onClick) { const node = document.createElement('button'); node.type='button'; node.className='menu_button'; node.textContent=label; node.addEventListener('click',onClick); modal.append(node); return node; }
   function block(message = '正在等待已有操作结束，请勿关闭页面。') {
-    const node = frame('正在切换存储方式'); progressText.textContent=message;
+    const node = frame('正在切换备份位置'); progressText.textContent=message;
     progressText.tabIndex=0;
     node.addEventListener('cancel',(event)=>event.preventDefault());
     node.addEventListener('keydown',(event)=>{
@@ -36,17 +42,19 @@ export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerati
     text('#boxed-lllllabc-storage-mode',names[state.active]);
     const health=await sqlite.status();
     const writable=health.ok && health.database?.writable===true;
-    text('#boxed-lllllabc-sqlite-state',health.ok ? writable ? 'SQLite 插件已连接，可写入（可选）'
-      : health.database?.writable===false ? 'SQLite 插件已连接，当前不可写入' : 'SQLite 插件已连接，写入权限未确认' : health.reason);
+    text('#boxed-lllllabc-sqlite-state',health.ok ? writable ? '服务器备份插件已连接'
+      : health.database?.writable===false ? '服务器备份插件已连接，暂时无法写入' : '服务器备份插件已连接，写入状态未确认' : '服务器备份插件未连接');
+    const connectionDetail=document.querySelector('#boxed-lllllabc-sqlite-detail');
+    if (connectionDetail) { connectionDetail.textContent=health.ok ? '' : health.reason || '请检查服务器备份插件是否已安装并启用。'; connectionDetail.hidden=!!health.ok; }
     const switchButton=document.querySelector('#boxed-lllllabc-switch-storage');
     const clearButton=document.querySelector('#boxed-lllllabc-clear-inactive');
     if (switchButton) switchButton.disabled=!!state.journal || state.active==='indexeddb' && !writable;
     const clearReason=state.journal ? '存在未完成的存储操作，请先恢复。'
-      : !state.lastTransfer || !state.previous || state.previous===state.active ? '完成存储切换后，才可清空保留的旧端数据。'
-      : !health.ok ? 'SQLite 插件当前不可用，请先恢复连接，再清空旧端数据。'
-      : !writable ? health.database?.writable===false ? 'SQLite 插件当前不可写入，暂不能清空旧端数据。' : 'SQLite 插件写入权限未确认，暂不能清空旧端数据。'
-      : `仅清空非活动端 ${names[state.previous]} 的箱装备份与快照；当前 ${names[state.active]}、备份开关和酒馆聊天文件保留。`;
-    if (clearButton) { clearButton.disabled=!!state.journal || !state.lastTransfer || !state.previous || state.previous===state.active || !writable; clearButton.textContent=state.previous ? `清空旧端数据（${names[state.previous]}）` : '清空旧端数据'; }
+      : !state.lastTransfer || !state.previous || state.previous===state.active ? '切换备份位置后，才可清空原存储位置保留的备份。'
+      : !health.ok ? '服务器备份插件未连接，请先恢复连接，再清空原位置的备份。'
+      : !writable ? health.database?.writable===false ? '服务器存储暂时无法写入，暂不能清空原位置的备份。' : '服务器存储写入状态未确认，暂不能清空原位置的备份。'
+      : storageChangeDescription('clear',state.active,state.previous);
+    if (clearButton) { clearButton.disabled=!!state.journal || !state.lastTransfer || !state.previous || state.previous===state.active || !writable; clearButton.textContent='清空原位置的备份'; }
     text('#boxed-lllllabc-clear-help',clearReason);
     return state;
   }
@@ -67,17 +75,15 @@ export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerati
     if (isGenerating()) { text(resultSelector,'请先停止生成，再切换或清空存储。'); return; }
     const to=kind==='switch' ? (state.active==='indexeddb'?'sqlite':'indexeddb') : state.previous;
     if (!to) return;
-    const node=frame(kind==='switch'?'切换存储方式':'清空旧端数据');
-    progressText.textContent=kind==='switch'
-      ? `${names[state.active]} → ${names[to]}。目标端原有箱装备份将被完整覆盖，不会合并。成功后原来源副本继续保留；失败时保留原来源和原目标。`
-      : `将清空非活动端 ${names[to]} 的全部箱装备份，此操作不可撤销。当前活动端 ${names[state.active]}、箱装设置及酒馆聊天文件不会被清空。`;
+    const node=frame(kind==='switch'?'切换备份位置':'清空原位置的备份');
+    progressText.textContent=storageChangeDescription(kind,state.active,to);
     const label=document.createElement('label'); const check=document.createElement('input'); check.type='checkbox'; label.append(check,document.createTextNode('我已停止生成并关闭其他酒馆页签，确认上述覆盖或清空范围。')); node.append(label);
     const cancel=button('取消',close);
     const submit=button(kind==='switch'?'确认覆盖并切换':'确认清空', async()=>{
       submit.disabled=true; cancel.disabled=true;
       try {
         const result=kind==='switch' ? await coordinator.switchTo(to,{confirmed:true}) : await coordinator.clearInactive(to,{confirmed:true});
-        text(resultSelector,kind==='switch' ? `切换成功，当前使用 ${names[result.active]}。原来源副本已保留。` : `${names[to]} 旧端数据已清空并校验。`);
+        text(resultSelector,kind==='switch' ? `已切换至${names[result.active]}。原位置的备份仍然保留。` : `原存储位置“${names[to]}”的备份已清空并完成校验。`);
         await refresh(); await afterChange();
       } catch(error) { await failure(error); }
     });

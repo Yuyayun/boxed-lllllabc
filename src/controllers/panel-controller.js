@@ -195,7 +195,7 @@ export function createPanelController({
             }
             : {},
           management: {
-            disabledReason: cleanupChat ? "" : "当前聊天还没有可管理的本地备份。",
+            disabledReason: cleanupChat ? "" : "当前聊天还没有可管理的备份。",
             storageText: createCurrentChatStorageText(
               getStorageSnapshot(),
               cleanupChat?.storageBytes ?? 0,
@@ -225,7 +225,7 @@ export function createPanelController({
       }
     } catch (error) {
       renderCurrentChatPanel(panelBody, {
-        status: createBackupStatus("db-error", "本地备份不可用", error),
+        status: createBackupStatus("db-error", "备份不可用", error),
         meta: current.identity.meta,
         messages: [],
         pending: [],
@@ -328,8 +328,8 @@ export function createPanelController({
       if (getLatestStatus().code === "full-frozen") {
         const pending = await readCurrentPending(current.identity.chatKey);
         setStatus(pending.length
-          ? createDisplayStatus("checking", "正在核对后端", "", pending)
-          : createDisplayStatus("saved", "酒馆已保存聊天记录"));
+          ? createDisplayStatus("checking", "正在检查保存状态", "", pending)
+          : createDisplayStatus("saved", "酒馆聊天已保存"));
       }
     } finally {
       session.close();

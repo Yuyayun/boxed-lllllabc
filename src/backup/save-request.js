@@ -27,7 +27,7 @@ export function validateSaveRequestPlan({ plan, current, pending }) {
   if (current.chat.length !== plan.chatLength || hashCanonicalChat(current.chat) !== plan.chatHash) {
     return {
       ok: false,
-      reason: "当前聊天内容已经变化，请重新确认后再请求保存。",
+      reason: "当前聊天内容已经变化，请重新确认后再请求酒馆保存。",
     };
   }
 
@@ -35,7 +35,7 @@ export function validateSaveRequestPlan({ plan, current, pending }) {
   if (safePending.length !== plan.pendingCount || fingerprintPending(safePending) !== plan.pendingFingerprint) {
     return {
       ok: false,
-      reason: "未保存变更已经变化，请重新确认后再请求保存。",
+      reason: "未保存变更已经变化，请重新确认后再请求酒馆保存。",
     };
   }
 

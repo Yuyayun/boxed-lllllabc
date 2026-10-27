@@ -19,8 +19,8 @@ test("最近备份层数有上下限", () => {
 test("配额错误不会继续显示为普通数据库故障", () => {
   const error = new Error("空间不足");
   error.name = "QuotaExceededError";
-  const status = createBackupStatus("db-error", "本地备份不可用", error);
-  assert.equal(status.shortText, "本地空间不足，备份未写入");
+  const status = createBackupStatus("db-error", "备份不可用", error);
+  assert.equal(status.shortText, "空间不足，备份未写入");
   assert.equal(status.errorName, "QuotaExceededError");
 });
 
@@ -38,7 +38,7 @@ test("关闭备份后不读取聊天也不写库", async () => {
   });
 
   assert.equal(status.code, "disabled");
-  assert.equal(status.shortText, "未启用");
+  assert.equal(status.shortText, "备份未启用");
   assert.equal(status.shortText.startsWith("箱装辣白菜："), false);
 });
 

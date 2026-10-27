@@ -21,7 +21,7 @@ export function openBackupCleanupDialog({ chat, plans = [], onConfirm } = {}) {
   const heading = document.createElement("div");
   heading.className = "boxed-lllllabc-cleanup-heading";
   const kicker = document.createElement("span");
-  kicker.textContent = "本地数据管理";
+  kicker.textContent = "备份管理";
   const title = document.createElement("strong");
   title.id = "boxed-lllllabc-cleanup-title";
   title.textContent = "清理聊天备份";
@@ -65,7 +65,7 @@ function renderCleanupChooser(body, plans, onPreview) {
   icon.setAttribute("aria-hidden", "true");
   const copy = document.createElement("div");
   const title = document.createElement("strong");
-  title.textContent = "只清理扩展当前活动存储的数据";
+  title.textContent = "只清理当前备份位置中的记录";
   const detail = document.createElement("span");
   detail.textContent = "不会删除或修改 SillyTavern 聊天文件。每次只能清理一种备份，确认前会再次校验数据。";
   copy.append(title, detail);
@@ -132,7 +132,7 @@ function renderCleanupConfirmation({ body, plan, onBack, onConfirm }) {
   const footer = document.createElement("footer");
   footer.className = "boxed-lllllabc-cleanup-footer";
   const back = createTextButton("fa-arrow-left", "返回", onBack);
-  const confirm = createTextButton("fa-trash-can", "确认清理本地备份", async () => {
+  const confirm = createTextButton("fa-trash-can", "确认清理备份", async () => {
     confirm.disabled = true;
     back.disabled = true;
     error.hidden = true;

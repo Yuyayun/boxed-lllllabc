@@ -346,7 +346,7 @@ test("新的后端核对会取消旧请求且旧响应不能再删 pending 或�
   assert.equal(statuses.at(-1), "unconfirmed");
 });
 
-test("立即核对从重试上限开始，因此弱网失败也只读取一次", async () => {
+test("检查保存状态从重试上限开始，因此弱网失败也只读取一次", async () => {
   const pending = [createMessageRecord({
     chatKey: "chat-a",
     messageIndex: 0,

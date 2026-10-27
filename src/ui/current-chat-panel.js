@@ -26,8 +26,8 @@ export function renderCurrentChatPanel(container, {
   const summary = document.createElement("div");
   summary.className = "boxed-lllllabc-panel-summary";
   summary.append(
-    renderLine("后端状态", status.shortText),
-    renderLine("上次核对", formatDate(status.updatedAt)),
+    renderLine("酒馆保存状态", status.shortText),
+    renderLine("上次检查", formatDate(status.updatedAt)),
   );
 
   for (const row of buildVisibleChatSummary(meta)) {
@@ -127,7 +127,7 @@ function formatFullBackupDetail(messages, meta, settings) {
       : "聊天疑似异常缩短，完整备份已保留";
   }
   if (meta.fullBackupState === "awaiting-confirmation") {
-    return `已保留 ${formatBackupRange(messages)} · 等待酒馆后端确认后接续`;
+    return `已保留 ${formatBackupRange(messages)} · 等待酒馆保存确认后继续更新`;
   }
   return `完整聊天 · ${formatBackupRange(messages)} · 更新于 ${formatDate(meta.fullBackupAt)}`;
 }
@@ -402,7 +402,7 @@ function renderPendingPreview(record) {
 
   const detail = document.createElement("span");
   detail.className = "boxed-lllllabc-recent-file-meta";
-  detail.textContent = `等待后端确认 · 更新于 ${formatDate(record.updatedAt)}`;
+  detail.textContent = `等待酒馆保存确认 · 更新于 ${formatDate(record.updatedAt)}`;
 
   const text = document.createElement("span");
   text.className = "boxed-lllllabc-recent-file-preview";

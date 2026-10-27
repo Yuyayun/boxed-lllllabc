@@ -82,6 +82,12 @@
 .boxed-lllllabc-settings-group > h4 { margin: 0 0 2px; font: inherit; font-weight: 700; }
 .boxed-lllllabc-settings-group > p { margin: 0; overflow-wrap: anywhere; }
 .boxed-lllllabc-settings-help { font-size: 0.9em; opacity: 0.78; line-height: 1.4; }
+.boxed-lllllabc-storage-locations { display: grid; gap: 12px; margin: 0; min-width: 0; }
+.boxed-lllllabc-storage-locations > div { display: grid; gap: 3px; min-width: 0; }
+.boxed-lllllabc-storage-locations dt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+.boxed-lllllabc-storage-locations dt small { opacity: 0.78; font-size: 0.9em; }
+.boxed-lllllabc-storage-locations dd { margin: 0; font-size: 0.9em; line-height: 1.4; overflow-wrap: anywhere; }
+.boxed-lllllabc-current-location { line-height: 1.4; overflow-wrap: anywhere; }
 .boxed-lllllabc-settings-group > .boxed-lllllabc-row { padding: 6px 0; border: 0; }
 .boxed-lllllabc-settings-group > .boxed-lllllabc-row > input[type="checkbox"] { flex: none; }
 .boxed-lllllabc-settings-group > .menu_button,
@@ -89,7 +95,8 @@
 .boxed-lllllabc-settings-group .boxed-lllllabc-actions { display: grid; grid-template-columns: minmax(0, 1fr); padding-top: 0; }
 .boxed-lllllabc-settings-group .boxed-lllllabc-storage-overview { padding: 8px 0 0; border: 0; }
 .boxed-lllllabc-settings-group .boxed-lllllabc-storage-heading { flex-wrap: wrap; }
-.boxed-lllllabc-settings-group .boxed-lllllabc-storage-metrics > div { grid-template-columns: minmax(0, 1fr) auto; }
+.boxed-lllllabc-settings-group .boxed-lllllabc-storage-metrics > div { grid-template-columns: minmax(0, 1fr) minmax(0, auto); }
+.boxed-lllllabc-settings-group .boxed-lllllabc-storage-metrics dt { overflow-wrap: anywhere; }
 .boxed-lllllabc-settings-group .boxed-lllllabc-storage-metrics dd { overflow-wrap: anywhere; }
 
 @container boxed-settings (max-width: 300px) {

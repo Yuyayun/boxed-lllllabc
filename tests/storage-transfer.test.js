@@ -43,8 +43,8 @@ test('迁移必须确认、持有浏览器锁，目标不可用时不建立任�
   await assert.rejects(coordinator.switchTo('sqlite'),/确认/);
   await assert.rejects(coordinator.switchTo('sqlite',{confirmed:true}),/多账户/);
   assert.equal((await control.read()).journal,null);assert.equal((await control.read()).active,'indexeddb');
-  await assert.rejects(coordinator.clearInactive('indexeddb',{confirmed:true}),/当前活动端/);
-  await assert.rejects(coordinator.clearInactive('sqlite',{confirmed:true}),/没有可清空/);
+  await assert.rejects(coordinator.clearInactive('indexeddb',{confirmed:true}),/当前正在使用的备份位置/);
+  await assert.rejects(coordinator.clearInactive('sqlite',{confirmed:true}),/没有已确认可清空的原存储位置/);
   await assert.rejects(createTransferCoordinator({control,adapters,locks:null}).switchTo('sqlite',{confirmed:true}),/跨页签/);
 });
 test('恢复按持久激活记录选择收尾或回滚；后端失联保留任务且不解除暂停',async()=>{

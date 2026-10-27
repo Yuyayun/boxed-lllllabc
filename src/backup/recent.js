@@ -7,7 +7,7 @@ export function createBackupStatus(code, shortText, detail = "") {
   const quotaFailure = code === "db-error" && errorName === "QuotaExceededError";
   return {
     code,
-    shortText: quotaFailure ? "本地空间不足，备份未写入" : shortText,
+    shortText: quotaFailure ? "空间不足，备份未写入" : shortText,
     detail: detail instanceof Error ? detail.message : String(detail ?? ""),
     ...(errorName ? { errorName } : {}),
     updatedAt: new Date().toISOString(),
@@ -16,7 +16,7 @@ export function createBackupStatus(code, shortText, detail = "") {
 
 export async function refreshRecentBackup({ contextReader, settings, reason = "unknown", triggers = [], storage = defaultBackupStorage }) {
   if (!settings.enabled) {
-    return createBackupStatus("disabled", "未启用");
+    return createBackupStatus("disabled", "备份未启用");
   }
 
   if (!settings.recentBackupEnabled) {
@@ -68,7 +68,7 @@ export async function refreshRecentBackup({ contextReader, settings, reason = "u
     }
   } catch (error) {
     console.error("[boxed-lllllabc] 本地备份失败", error);
-    return createBackupStatus("db-error", "本地备份不可用", error);
+    return createBackupStatus("db-error", "备份不可用", error);
   }
 
   return createBackupStatus("ok", `已备份最近 ${messages.length} 层`);

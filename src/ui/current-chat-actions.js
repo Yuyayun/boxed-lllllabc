@@ -3,7 +3,7 @@ export function renderBackupManagement({ onOpen, disabledReason = "", storageTex
   section.className = "boxed-lllllabc-backup-management";
   const copy = document.createElement("div");
   const title = document.createElement("strong");
-  title.textContent = "本地备份管理";
+  title.textContent = "备份管理";
   const detail = document.createElement("span");
   detail.textContent = "只管理扩展为当前聊天保存的数据，不影响酒馆聊天文件。";
   copy.append(title, detail);
@@ -24,7 +24,7 @@ export function renderBackupManagement({ onOpen, disabledReason = "", storageTex
   label.textContent = "管理清理";
   action.append(icon, label);
   action.disabled = typeof onOpen !== "function";
-  if (action.disabled) action.title = disabledReason || "当前聊天还没有可管理的本地备份。";
+  if (action.disabled) action.title = disabledReason || "当前聊天还没有可管理的备份。";
   action.addEventListener("click", async () => {
     if (typeof onOpen !== "function") return;
     action.disabled = true;
@@ -62,8 +62,8 @@ export function renderPrimaryActions({ restore = {}, onVerify, onCreateSnapshot 
     }),
     createPrimaryAction({
       icon: "fa-floppy-disk",
-      label: "请求保存",
-      description: "让酒馆保存当前聊天并核对后端",
+      label: "请求酒馆保存",
+      description: "请求酒馆保存当前聊天，并检查保存结果",
       onClick: restore.onRequestSave,
       disabledReason: restore.disabledReason || "需要先打开可识别的聊天。",
     }),
@@ -76,8 +76,8 @@ export function renderPrimaryActions({ restore = {}, onVerify, onCreateSnapshot 
     }),
     createPrimaryAction({
       icon: "fa-rotate",
-      label: "立即核对",
-      description: "只读取酒馆后端，不请求保存",
+      label: "检查保存状态",
+      description: "只检查酒馆聊天文件，不发起保存",
       onClick: onVerify,
       disabledReason: "需要先打开可识别的聊天。",
     }),

@@ -6,14 +6,14 @@ export function buildSaveRequestDialogModel({ chatName, pending }) {
   const summary = summarizePendingChanges(pending);
   const hasPending = summary.count > 0;
   return {
-    title: hasPending ? "重新请求保存" : "请求保存当前聊天",
+    title: hasPending ? "重新请求酒馆保存" : "请求酒馆保存当前聊天",
     chatName: chatName || "当前聊天",
     pendingCount: summary.count,
     pendingRange: summary.rangeText || "当前没有待确认变更",
     hasPending,
     explanation: hasPending
-      ? "不会恢复、覆盖或删除任何备份，也不会立即清除未保存变更。后端核对一致后才会自动清除。"
-      : "不会恢复、覆盖或删除任何备份。保存请求完成后，会用当前整聊内容核对后端是否一致。",
+      ? "不会恢复、覆盖或删除任何备份，也不会立即清除未保存变更。确认酒馆聊天文件已保存后，才会自动清除。"
+      : "不会恢复、覆盖或删除任何备份。保存请求完成后，会检查酒馆聊天文件是否与当前完整聊天一致。",
   };
 }
 
@@ -59,7 +59,7 @@ export function openSaveRequestDialog({ plan, chatName, pending, onConfirm }) {
   icon.setAttribute("aria-hidden", "true");
   const explanationText = document.createElement("div");
   const explanationTitle = document.createElement("strong");
-  explanationTitle.textContent = "只重新请求酒馆保存当前前端聊天";
+  explanationTitle.textContent = "重新请求酒馆保存当前聊天";
   const explanationDetail = document.createElement("div");
   explanationDetail.textContent = model.explanation;
   explanationText.append(explanationTitle, explanationDetail);
@@ -80,18 +80,18 @@ export function openSaveRequestDialog({ plan, chatName, pending, onConfirm }) {
     confirm.disabled = true;
     cancel.disabled = true;
     confirm.setAttribute("aria-busy", "true");
-    confirm.querySelector("span").textContent = "正在请求保存";
+    confirm.querySelector("span").textContent = "正在请求酒馆保存";
     try {
       const result = await onConfirm(plan);
       if (result?.ok) {
         closeSaveRequestDialog();
         return;
       }
-      error.textContent = result?.reason || "请求保存失败，未保存变更仍会保留。";
+      error.textContent = result?.reason || "请求酒馆保存失败，未保存变更仍会保留。";
       error.hidden = false;
       confirm.querySelector("span").textContent = "请重新确认";
     } catch (cause) {
-      error.textContent = cause instanceof Error ? cause.message : "请求保存失败，未保存变更仍会保留。";
+      error.textContent = cause instanceof Error ? cause.message : "请求酒馆保存失败，未保存变更仍会保留。";
       error.hidden = false;
       confirm.querySelector("span").textContent = "请重新确认";
     } finally {

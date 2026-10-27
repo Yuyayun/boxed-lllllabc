@@ -98,7 +98,7 @@ function runTransaction(db, storeNames, mode, callback) {
 
     Promise.resolve()
       .then(async () => {
-        if (guarded && (await requestToPromise(transaction.objectStore(TRANSFER_STORES.meta).get("lock")))?.value) throw new Error("切换存储方式期间备份操作已锁定。");
+        if (guarded && (await requestToPromise(transaction.objectStore(TRANSFER_STORES.meta).get("lock")))?.value) throw new Error("切换备份位置期间备份操作已锁定。");
         return callback(stores);
       })
       .then(async (result) => {
