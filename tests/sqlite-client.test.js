@@ -5,8 +5,36 @@ import { createBackupStorage } from "../src/storage/service.js";
 import { STORAGE_PROTOCOL, encodeStorageValue, decodeStorageValue } from "../src/storage/protocol.js";
 import { createBackendVerifier } from "../src/controllers/backend-verifier.js";
 import { createMessageRecord } from "../src/backup/pending.js";
+import { createCatalogController } from "../src/controllers/catalog-controller.js";
 
 const response = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
+
+for (const phase of ["fetch", "body"]) {
+  test(`SQLite 批量请求 ${phase} 阶段实际超时中断保留未知结果`, async () => {
+    let submitted = 0, abortError;
+    const adapter = createSqliteStorage({ timeoutMs: 5, fetchImpl: async (url, { signal }) => {
+      if (url.endsWith("/status")) return response({ ok: true, protocol: STORAGE_PROTOCOL });
+      submitted++;
+      const interrupted = () => new Promise((_resolve, reject) => {
+        const abort = () => { abortError = signal.reason; reject(abortError); };
+        if (signal.aborted) abort(); else signal.addEventListener("abort", abort, { once: true });
+      });
+      return phase === "fetch" ? interrupted() : { ok: true, status: 200, json: interrupted };
+    } });
+    const session = await adapter.open();
+    try {
+      await assert.rejects(session.deleteBackupBatch({}), error => {
+        assert.equal(error, abortError); assert.equal(error.name, "AbortError"); assert.equal(error.code, 20);
+        return true;
+      });
+    } finally { session.close(); }
+    const controller = createCatalogController({ storage: createBackupStorage({ adapter }) });
+    const result = await controller.executeBatch({ mode: "sqlite", actions: [{}] }, { confirmed: true });
+    assert.equal(submitted, 2); assert.equal(result.ok, false); assert.equal(result.unknown, true);
+    assert.equal(result.committed, null); assert.equal(result.succeeded, null); assert.equal(result.failed, null);
+    assert.match(result.reason, /不要直接重试旧计划/);
+  });
+}
 
 test("SQLite 空间预检查只读取服务端容量，不足时拒绝暂存", async () => {
   const calls=[];

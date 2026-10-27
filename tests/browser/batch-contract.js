@@ -69,18 +69,27 @@ export async function runBatchContract({sqlite=true}={}) {
     }
   }
   if(sqlite){
+    for(const failure of ['network','fetch-abort','body-abort']){
     await seed('sqlite');
     const uncertainAdapter=createSqliteStorage({getRequestHeaders:()=>({'X-CSRF-Token':token}),fetchImpl:async(url,options)=>{
       const response=await fetch(url,options);
-      if(options.body&&JSON.parse(options.body).operation==='deleteBackupBatch'){await response.clone().json();throw new TypeError('P5 simulated lost commit response');}
+      if(options.body&&JSON.parse(options.body).operation==='deleteBackupBatch'){
+        const committed=await response.clone().json();assert(response.ok&&committed.ok,'故障必须在真实提交成功后注入');
+        if(failure==='network')throw new TypeError('P5 simulated lost commit response');
+        const aborted=new DOMException('P5 simulated interrupted commit response','AbortError');assert(aborted.code===20);
+        if(failure==='fetch-abort')throw aborted;
+        return {ok:response.ok,status:response.status,json:async()=>{throw aborted;}};
+      }
       return response;
     }});
     const uncertainController=createCatalogController({storage:createBackupStorage({adapter:uncertainAdapter}),renderDialog:()=>{}});
     const uncertainPlan=await uncertainController.previewBatch({range:'all'}),uncertain=await uncertainController.executeBatch(uncertainPlan,{confirmed:true});
-    assert(!uncertain.ok&&uncertain.unknown&&uncertain.succeeded===null);
+    assert(!uncertain.ok&&uncertain.unknown&&uncertain.committed===null&&uncertain.succeeded===null&&uncertain.failed===null);
+    assert(uncertain.reason.includes('不要直接重试旧计划'));
     assert(buildBackupCatalog(await use('sqlite',s=>s.getBackupCatalogData())).recordCount===5);
     let oldRejected=false;try{await use('sqlite',s=>s.deleteBackupBatch({plan:uncertainPlan,confirmed:true}));}catch(error){oldRejected=error.code==='stale-cleanup-plan';}assert(oldRejected);
-    checks.push('SQLite 已实际提交但响应丢失时明确报告结果未确认；不误报零删除或全部成功，旧计划再次执行被拒绝');
+    checks.push(`SQLite 已实际提交但 ${failure} 故障时明确报告结果未确认；不误报零删除或全部成功，旧计划再次执行被拒绝`);
+    }
     await seed('indexeddb');await seed('sqlite');const inactiveBefore=stableText(await use('sqlite',s=>s.getBackupCatalogData()));
     const localPlan=await preview('indexeddb');await use('indexeddb',s=>s.deleteBackupBatch({plan:localPlan,confirmed:true}));
     assert(stableText(await use('sqlite',s=>s.getBackupCatalogData()))===inactiveBefore);

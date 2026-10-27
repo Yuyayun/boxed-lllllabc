@@ -17,7 +17,9 @@ export function createSqliteStorage({ fetchImpl = globalThis.fetch, getRequestHe
       if (response.status === 404) return { ok: false, code: "unavailable", reason: "SQLite 插件未安装、未启用或不可连接。" };
       let data;
       try { data = await response.json(); }
-      catch {
+      catch (error) {
+        // Aborting the response body can happen after a write has committed.
+        if (error.name === "AbortError" || error.name === "TimeoutError") throw error;
         throw Object.assign(new Error(response.status === 403
           ? "酒馆拒绝了 SQLite 请求，请检查登录状态与 CSRF 保护。"
           : "SQLite 插件未返回兼容的协议响应，请检查安装及版本。"), { code: response.status === 403 ? "permission-denied" : "unavailable" });

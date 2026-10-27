@@ -122,7 +122,9 @@ export function createCatalogController({
       return { ...result, refreshWarning: refreshes.some(item => item.status === "rejected"
         || item.value?.ok === false) ? "删除已提交，但部分显示刷新失败，请手动刷新。" : "" };
     } catch (error) {
-      const unknown = submitted && mode === "sqlite" && (!error.code || error.code === "outcome-unknown");
+      // DOMException codes (AbortError: 20, TimeoutError: 23) do not prove rollback.
+      const interrupted = error.name === "AbortError" || error.name === "TimeoutError";
+      const unknown = submitted && mode === "sqlite" && (interrupted || !error.code || error.code === "outcome-unknown");
       return { ok: false, committed: unknown ? null : false, unknown, stale: error.code === "stale-cleanup-plan",
         succeeded: unknown ? null : 0, skipped: 0, failed: unknown ? null : plan?.actions?.length ?? 0,
         reason: unknown ? "服务器执行结果未确认。请刷新并核对备份后重新预览，不要直接重试旧计划。"

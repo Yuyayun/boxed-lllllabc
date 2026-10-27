@@ -74,11 +74,26 @@ test("控制器从活动端新读预览，未确认或模式改变不调用删�
 test("事务失败、过期计划与网络结果未知不会误报成功", async () => {
   for (const [fail, mode, unknown] of [[new Error("IDB quota"), "indexeddb", false],
     [Object.assign(new Error("stale"), { code: "stale-cleanup-plan" }), "sqlite", false],
-    [new TypeError("Failed to fetch"), "sqlite", true], [Object.assign(new Error("timeout"), { code: "outcome-unknown" }), "sqlite", true]]) {
+    [Object.assign(new Error("rollback"), { code: "database-unavailable" }), "sqlite", false],
+    [new DOMException("The operation was aborted.", "AbortError"), "indexeddb", false],
+    [new TypeError("Failed to fetch"), "sqlite", true],
+    [new DOMException("The operation was aborted.", "AbortError"), "sqlite", true],
+    [new DOMException("The operation timed out.", "TimeoutError"), "sqlite", true],
+    [Object.assign(new Error("timeout"), { code: "outcome-unknown" }), "sqlite", true]]) {
     const { controller } = controllerFixture({ fail, mode }); const plan = await controller.previewBatch({ range: "all" });
     const result = await controller.executeBatch(plan, { confirmed: true });
     assert.equal(result.ok, false); assert.equal(result.unknown, unknown); assert.equal(result.succeeded, unknown ? null : 0);
+    assert.equal(result.committed, unknown ? null : false); assert.equal(result.failed, unknown ? null : plan.actions.length);
+    if (unknown) assert.match(result.reason, /不要直接重试旧计划/);
   }
+});
+
+test("SQLite 提交前打开会话中断不会报告结果未知，也不会调用删除", async () => {
+  const controller = createCatalogController({ storage: { getMode: () => "sqlite", open: async () => {
+    throw new DOMException("The operation was aborted.", "AbortError");
+  } } });
+  const result = await controller.executeBatch({ mode: "sqlite", actions: [{}] }, { confirmed: true });
+  assert.equal(result.unknown, false); assert.equal(result.committed, false); assert.equal(result.succeeded, 0);
 });
 test("已提交后的刷新异常保持删除结果；迁移暂停门不允许执行批量清理", async () => {
   const f = controllerFixture({ refreshFail: true }), plan = await f.controller.previewBatch({ range: "all" });
