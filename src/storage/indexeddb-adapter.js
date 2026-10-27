@@ -28,6 +28,7 @@ const OPERATIONS = Object.freeze({
   deletePendingChanges: database.deletePendingChanges,
   deletePendingChangesIfUnchanged: database.deletePendingChangesIfUnchanged,
   getBackupCatalogData: database.getBackupCatalogData,
+  getBackupCatalog: database.getBackupCatalog,
   reconcileChatIdentity: database.reconcileChatIdentity,
   migrateRenamedChatIdentity: database.migrateRenamedChatIdentity,
   deleteBackupTypeForChat: database.deleteBackupTypeForChat,

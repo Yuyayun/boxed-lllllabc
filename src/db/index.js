@@ -36,6 +36,7 @@ export const {
   replaceFullSnapshot,
   getChatMeta,
   getBackupCatalogData,
+  getBackupCatalog,
   reconcileChatIdentity,
   migrateRenamedChatIdentity,
   deleteBackupTypeForChat,
@@ -48,7 +49,14 @@ export const {
   deletePendingChangesIfUnchanged,
   pendingDeletionFingerprint,
   updateChatMetaSummary,
-} = createBackupOperations({ runTransaction, requestToPromise });
+} = createBackupOperations({ runTransaction, requestToPromise, catalogDriver: {
+  count: store => requestToPromise(store.count()),
+  keys: store => store.name === STORES.chatMeta ? requestToPromise(store.getAllKeys()) : new Promise((resolve, reject) => {
+    const keys = [], read = store.index("by_chat").openKeyCursor(null, "nextunique");
+    read.onerror = () => reject(read.error);
+    read.onsuccess = () => { const cursor = read.result; if (!cursor) resolve(keys); else { keys.push(cursor.key); cursor.continue(); } };
+  }),
+} });
 
 export const { beginSnapshot, appendSnapshotMessages, publishSnapshot, getSnapshotHeader, getSnapshotMessages, listSnapshots, renameSnapshot, deleteSnapshot } = createSnapshotOperations({ runTransaction, requestToPromise });
 

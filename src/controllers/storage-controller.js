@@ -2,6 +2,7 @@ import { buildBackupCatalog } from "../backup/catalog.js";
 import { defaultBackupStorage } from "../storage/service.js";
 import { describeStorageFailure } from "../storage/health.js";
 import { createStorageSnapshot, estimateOriginStorage } from "../storage/quota.js";
+import { readBackupCatalog } from "../storage/catalog-reader.js";
 
 const WARNING_SESSION_KEY = "boxed-lllllabc:storage-warning-shown";
 
@@ -38,17 +39,14 @@ export function createStorageController({
         return latestSnapshot;
       }
       session = await storage.open();
-      const data = await session.getBackupCatalogData();
+      const catalog = await readBackupCatalog(session, buildCatalog);
       let snapshotBytes = 0, after = "";
       if (session.listSnapshots) do {
         const page = await session.listSnapshots({ after });
         snapshotBytes += page.items.reduce((sum, item) => sum + (Number(item.contentBytes) || 0), 0);
         after = page.after;
       } while (after);
-      const [catalog, estimate] = await Promise.all([
-        Promise.resolve(buildCatalog(data)),
-        estimateStorage(),
-      ]);
+      const estimate = await estimateStorage();
       latestSnapshot = createStorageSnapshot({ catalog: { ...catalog, storageBytes: (catalog.storageBytes || 0) + snapshotBytes }, estimate });
       latestSnapshot.mode = "indexeddb";
       renderOverview?.(latestSnapshot);

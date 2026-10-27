@@ -2,6 +2,7 @@ import { buildBackupCatalog } from "../backup/catalog.js";
 import { createBackupCleanupPlans, validateBackupCleanupPlan } from "../backup/cleanup.js";
 import { createBatchCleanupPlan } from "../backup/batch-cleanup.js";
 import { defaultBackupStorage } from "../storage/service.js";
+import { readBackupCatalog } from "../storage/catalog-reader.js";
 import {
   openBackupCatalogDialog,
   renderBackupCatalogDialog,
@@ -24,8 +25,7 @@ export function createCatalogController({
     let session;
     try {
       session = await storage.open();
-      const data = await session.getBackupCatalogData();
-      const catalog = buildCatalog(data);
+      const catalog = await readBackupCatalog(session, buildCatalog);
       renderDialog({ catalog });
       return { ok: true, catalog };
     } catch (error) {
@@ -58,8 +58,7 @@ export function createCatalogController({
     let session;
     try {
       session = await storage.open();
-      const data = await session.getBackupCatalogData();
-      const catalog = buildCatalog(data);
+      const catalog = await readBackupCatalog(session, buildCatalog);
       const currentChat = catalog.chats.find((chat) => chat.chatKey === plan?.chatKey);
       const validation = validateBackupCleanupPlan({ plan, chat: currentChat });
       if (!validation.ok) {
@@ -96,7 +95,7 @@ export function createCatalogController({
       let session;
       try {
         session = await storage.open();
-        return createBatchCleanupPlan({ catalog: buildCatalog(await session.getBackupCatalogData()),
+        return createBatchCleanupPlan({ catalog: await readBackupCatalog(session, buildCatalog),
           selection, mode: storage.getMode() });
       } finally { session?.close?.(); }
     });
