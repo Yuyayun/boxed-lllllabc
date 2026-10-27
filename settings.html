@@ -21,7 +21,7 @@
         <section class="boxed-lllllabc-extension-meta" aria-label="扩展版本与信息">
           <div class="boxed-lllllabc-extension-meta-line">
             <div class="boxed-lllllabc-extension-meta-copy">
-              <span id="boxed-lllllabc-version">Ver 0.1.4</span>
+              <span id="boxed-lllllabc-version">Ver 1.0.0</span>
               <span class="boxed-lllllabc-meta-separator" aria-hidden="true"></span>
               <button
                 id="boxed-lllllabc-info-toggle"
@@ -46,7 +46,10 @@
 
         <section class="boxed-lllllabc-settings-group" data-settings-group="storage" aria-labelledby="boxed-lllllabc-group-storage">
           <h4 id="boxed-lllllabc-group-storage">备份存放位置</h4>
-          <p class="boxed-lllllabc-current-location">当前使用：<strong id="boxed-lllllabc-storage-mode">正在读取</strong></p>
+          <div class="boxed-lllllabc-storage-banner">
+            <p class="boxed-lllllabc-current-location">当前使用：<strong id="boxed-lllllabc-storage-mode">正在读取</strong></p>
+            <p id="boxed-lllllabc-sqlite-state" role="status">正在检查服务器备份插件连接</p>
+          </div>
           <dl class="boxed-lllllabc-storage-locations">
             <div>
               <dt><strong>浏览器本地存储</strong><small>IndexedDB</small></dt>
@@ -58,10 +61,11 @@
             </div>
           </dl>
           <p class="boxed-lllllabc-settings-help">服务器备份插件可选。安装或检查连接不会切换备份位置，也不会自动迁移。</p>
-          <p id="boxed-lllllabc-sqlite-state" role="status">正在检查服务器备份插件连接</p>
           <p id="boxed-lllllabc-sqlite-detail" class="boxed-lllllabc-settings-help" hidden></p>
-          <button id="boxed-lllllabc-check-storage" class="menu_button boxed-lllllabc-action-button" type="button">检查服务器连接</button>
-          <button id="boxed-lllllabc-switch-storage" class="menu_button boxed-lllllabc-action-button" type="button" disabled>切换备份位置</button>
+          <div class="boxed-lllllabc-storage-actions">
+            <button id="boxed-lllllabc-check-storage" class="menu_button boxed-lllllabc-action-button" type="button"><i class="fa-solid fa-plug" aria-hidden="true"></i><span>检查服务器连接</span></button>
+            <button id="boxed-lllllabc-switch-storage" class="menu_button boxed-lllllabc-action-button" type="button" disabled><i class="fa-solid fa-right-left" aria-hidden="true"></i><span>切换备份位置</span></button>
+          </div>
           <p id="boxed-lllllabc-transfer-result" role="status"></p>
         <div class="boxed-lllllabc-storage-overview" aria-labelledby="boxed-lllllabc-storage-title">
           <div class="boxed-lllllabc-storage-heading">
@@ -156,8 +160,10 @@
 
         <section class="boxed-lllllabc-settings-group" data-settings-group="snapshots" aria-labelledby="boxed-lllllabc-group-snapshots">
           <h4 id="boxed-lllllabc-group-snapshots">聊天快照</h4>
-          <p>手动保存完整聊天，存档内容独立保留。</p>
-          <button id="boxed-lllllabc-manage-snapshots" class="menu_button boxed-lllllabc-action-button" type="button">管理聊天快照</button>
+          <div class="boxed-lllllabc-inline-action">
+            <p>手动保存完整聊天，存档内容独立保留。</p>
+            <button id="boxed-lllllabc-manage-snapshots" class="menu_button boxed-lllllabc-action-button" type="button"><i class="fa-solid fa-camera" aria-hidden="true"></i><span>管理聊天快照</span></button>
+          </div>
         </section>
 
         <section class="boxed-lllllabc-settings-group" data-settings-group="management" aria-labelledby="boxed-lllllabc-group-management">
@@ -186,8 +192,10 @@
 
         <section class="boxed-lllllabc-settings-group" data-settings-group="inactive" aria-labelledby="boxed-lllllabc-group-inactive">
           <h4 id="boxed-lllllabc-group-inactive">原存储位置的数据管理</h4>
-          <p id="boxed-lllllabc-clear-help" class="boxed-lllllabc-settings-help">切换备份位置后，才可清空原存储位置保留的备份。</p>
-          <button id="boxed-lllllabc-clear-inactive" class="menu_button boxed-lllllabc-action-button" type="button" aria-describedby="boxed-lllllabc-clear-help" disabled>清空原位置的备份</button>
+          <div class="boxed-lllllabc-inline-action">
+            <p id="boxed-lllllabc-clear-help" class="boxed-lllllabc-settings-help">切换备份位置后，才可清空原存储位置保留的备份。</p>
+            <button id="boxed-lllllabc-clear-inactive" class="menu_button boxed-lllllabc-action-button" type="button" aria-describedby="boxed-lllllabc-clear-help" disabled>清空原位置的备份</button>
+          </div>
           <p id="boxed-lllllabc-clear-result" role="status"></p>
         </section>
 
