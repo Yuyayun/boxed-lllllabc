@@ -3,6 +3,7 @@ import { DB_NAME, DB_VERSION, TRANSFER_STORES, STORES } from "./schema.js";
 import { createBackupOperations } from "../storage/operations.js";
 import { createSnapshotOperations } from "../storage/snapshot-operations.js";
 import { encodeStorageValue } from "../storage/protocol.js";
+import { ACTIVE_DATASET_KEY, datasetId, datasetStore } from "../storage/dataset-layout.js";
 
 export function openBackupDatabase() {
   if (!globalThis.indexedDB) {
@@ -51,7 +52,7 @@ export const {
   updateChatMetaSummary,
 } = createBackupOperations({ runTransaction, requestToPromise, catalogDriver: {
   count: store => requestToPromise(store.count()),
-  keys: store => store.name === STORES.chatMeta ? requestToPromise(store.getAllKeys()) : new Promise((resolve, reject) => {
+  keys: store => [STORES.chatMeta, datasetStore(STORES.chatMeta, 1)].includes(store.name) ? requestToPromise(store.getAllKeys()) : new Promise((resolve, reject) => {
     const keys = [], read = store.index("by_chat").openKeyCursor(null, "nextunique");
     read.onerror = () => reject(read.error);
     read.onsuccess = () => { const cursor = read.result; if (!cursor) resolve(keys); else { keys.push(cursor.key); cursor.continue(); } };
@@ -85,11 +86,8 @@ function snapshotDriver(store) {
 function runTransaction(db, storeNames, mode, callback) {
   return new Promise((resolve, reject) => {
     const guarded = db.objectStoreNames?.contains(TRANSFER_STORES.meta);
-    const transaction = db.transaction(guarded ? [...storeNames, TRANSFER_STORES.meta] : storeNames, mode);
-    const stores = new Map(storeNames.map((name) => {
-      const store = transaction.objectStore(name);
-      return [name, name === STORES.snapshots || name === STORES.snapshotMessages ? snapshotDriver(store) : store];
-    }));
+    const physicalNames = storeNames.flatMap(name => [name, datasetStore(name, 1)].filter(physical => db.objectStoreNames?.contains(physical) ?? physical === name));
+    const transaction = db.transaction(guarded ? [...physicalNames, TRANSFER_STORES.meta] : physicalNames, mode);
     let callbackResult;
 
     transaction.oncomplete = () => resolve(callbackResult);
@@ -99,6 +97,11 @@ function runTransaction(db, storeNames, mode, callback) {
     Promise.resolve()
       .then(async () => {
         if (guarded && (await requestToPromise(transaction.objectStore(TRANSFER_STORES.meta).get("lock")))?.value) throw new Error("切换备份位置期间备份操作已锁定。");
+        const active = guarded ? datasetId((await requestToPromise(transaction.objectStore(TRANSFER_STORES.meta).get(ACTIVE_DATASET_KEY)))?.value) : 0;
+        const stores = new Map(storeNames.map((name) => {
+          const store = transaction.objectStore(datasetStore(name, active));
+          return [name, name === STORES.snapshots || name === STORES.snapshotMessages ? snapshotDriver(store) : store];
+        }));
         return callback(stores);
       })
       .then(async (result) => {

@@ -2,6 +2,7 @@ import { openBackupDatabase } from "../db/index.js";
 import { TRANSFER_STORES } from "../db/schema.js";
 import { DATA_STORES, TRANSFER_PAGE_BYTES, transferId, recordText, digestRow, readTransferManifest, sameManifest } from "./transfer-format.js";
 import { encodeStorageValue } from "./protocol.js";
+import { ALL_DATASET_STORES, ACTIVE_DATASET_KEY, datasetId } from "./dataset-layout.js";
 
 const request = (value) => new Promise((resolve, reject) => { value.onsuccess = () => resolve(value.result); value.onerror = () => reject(value.error); });
 const cursor = (store, callback, range) => new Promise((resolve, reject) => {
@@ -19,7 +20,7 @@ export function createIndexedDbTransfer({ openDatabase = openBackupDatabase } = 
   async function tx(mode, callback, allowUnknown = false) {
     const db = await openDatabase();
     try {
-      for (const name of db.objectStoreNames) if (!allowUnknown && ![...DATA_STORES, ...Object.values(TRANSFER_STORES)].includes(name)) throw new Error(`发现未知数据仓库 ${name}，未丢弃数据，已停止切换。`);
+      for (const name of db.objectStoreNames) if (!allowUnknown && ![...ALL_DATASET_STORES, ...Object.values(TRANSFER_STORES)].includes(name)) throw new Error(`发现未知数据仓库 ${name}，未丢弃数据，已停止切换。`);
       return await new Promise((resolve, reject) => {
         const transaction = db.transaction([...DATA_STORES, ...Object.values(TRANSFER_STORES)], mode);
         const meta = transaction.objectStore(TRANSFER_STORES.meta);
@@ -27,7 +28,10 @@ export function createIndexedDbTransfer({ openDatabase = openBackupDatabase } = 
         let result;
         transaction.oncomplete = () => resolve(result);
         transaction.onerror = transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB 切换事务中止。"));
-        Promise.resolve().then(() => callback({ meta, rows, store: (name) => transaction.objectStore(name) }))
+        Promise.resolve().then(async () => {
+          if (datasetId((await request(meta.get(ACTIVE_DATASET_KEY)))?.value) !== 0) throw new Error("当前数据区需要新版分批迁移流程，旧流程未修改任何备份。");
+          return callback({ meta, rows, store: (name) => transaction.objectStore(name) });
+        })
           .then((value) => { result = value; }).catch((error) => { try { transaction.abort(); } catch {} reject(error); });
       });
     } finally { db.close(); }

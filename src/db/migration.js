@@ -1,6 +1,19 @@
 import { INDEXES, STORES, TRANSFER_STORES } from "./schema.js";
+import { DATASET_NAMES, datasetStore } from "../storage/dataset-layout.js";
 
 export function migrateDatabase(db, transaction) {
+  // Add empty destinations only. The versionchange transaction never iterates
+  // or rewrites the existing 1.0.0 payloads.
+  for (const name of DATASET_NAMES) {
+    const physical = datasetStore(name, 1);
+    if (db.objectStoreNames.contains(physical)) continue;
+    const keyPath = name === "chat_meta" ? "chatKey"
+      : name === "pending_changes" || name === "snapshots" ? "id"
+      : name === "snapshot_messages" ? ["snapshotId", "messageIndex"] : ["chatKey", "messageIndex"];
+    const store = db.createObjectStore(physical, { keyPath });
+    if (name === "chat_meta") store.createIndex("by_lastBackupAt", "lastBackupAt", { unique: false });
+    else store.createIndex(name === "snapshot_messages" ? "by_snapshot" : "by_chat", name === "snapshot_messages" ? "snapshotId" : "chatKey", { unique: false });
+  }
   if (!db.objectStoreNames.contains(STORES.snapshots)) db.createObjectStore(STORES.snapshots, { keyPath: "id" }).createIndex("by_chat", "chatKey");
   if (!db.objectStoreNames.contains(STORES.snapshotMessages)) db.createObjectStore(STORES.snapshotMessages, { keyPath: ["snapshotId", "messageIndex"] }).createIndex("by_snapshot", "snapshotId");
   if (!db.objectStoreNames.contains(TRANSFER_STORES.meta)) db.createObjectStore(TRANSFER_STORES.meta, { keyPath: "key" });
