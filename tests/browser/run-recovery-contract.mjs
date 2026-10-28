@@ -5,6 +5,7 @@ import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
+import {Worker} from 'node:worker_threads';
 import { encodeStorageValue, decodeStorageValue } from '../../src/storage/protocol.js';
 
 if(!process.env.BOXED_SERVER_REPOSITORY)throw new Error('Set BOXED_SERVER_REPOSITORY');
@@ -14,14 +15,14 @@ const {SqliteWorker}=await import(pathToFileURL(path.join(backend,'src/worker-cl
 const {SqliteRepository}=await import(pathToFileURL(path.join(backend,'src/sqlite.js')).href);
 const {chromium}=await import(process.env.BOXED_PLAYWRIGHT_PATH?pathToFileURL(process.env.BOXED_PLAYWRIGHT_PATH).href:'playwright');
 const root=fileURLToPath(new URL('../../',import.meta.url)),tempRoot=await fs.realpath(os.tmpdir()),directory=await fs.mkdtemp(path.join(tempRoot,'boxed-formal-browser-')),nonce=randomUUID();
-let routes,handlers,worker,file,index=0,browser;
+let routes,handlers,worker,file,index=0,browser,slowWorker=false;
 async function install(reset=false) {
   await routes?.close();if(reset)index++;
   const instance=path.join(directory,'case-'+index),storage=path.join(instance,'boxed-storage');await fs.mkdir(storage,{recursive:true});file=path.join(storage,'boxed-lllllabc.sqlite');
   handlers=new Map();
   const router={get:(url,fn)=>handlers.set('GET '+url,fn),post:(url,fn)=>handlers.set('POST '+url,fn)};
   const host={root:instance,dataRoot:path.join(instance,'data'),defaultHandle:'default-user',users:async()=>[],csrfEnabled:()=>true,config:(key,fallback)=>key==='boxedLllllabc.databaseDirectory'?storage:key==='enableUserAccounts'?false:fallback};
-  routes=installRoutes(router,{host,createWorker:database=>worker=new SqliteWorker(database)});
+  routes=installRoutes(router,{host,createWorker:database=>worker=new SqliteWorker(database,slowWorker?{workerFactory:(_url,options)=>new Worker(pathToFileURL(path.join(backend,'tests/fixtures/slow-recovery-worker.js')),options)}:{})});
 }
 const server=http.createServer(async(req,res)=>{
   try{
@@ -36,16 +37,19 @@ const server=http.createServer(async(req,res)=>{
       const body=chunks.length?JSON.parse(Buffer.concat(chunks).toString('utf8')):undefined;
       if(pathname==='/fixture'){
         const args=decodeStorageValue(body.args);let result;
-        if(body.method==='reset'){await install(true);result=true;}
+        if(body.method==='reset'){slowWorker=false;await install(true);result=true;}
+        else if(body.method==='slow-recovery-worker'){slowWorker=true;await install(false);result=true;}
         else if(body.method==='restart-worker'){
           if(worker){worker.fail(Object.assign(new Error('fixture-process-exit'),{code:'database-unavailable'}));await worker.worker.terminate();}
           await install(false);result=true;
         }else{
-          const repo=new SqliteRepository(file,{readOnly:body.method!=='mutate-source'});
+          const repo=new SqliteRepository(file,{readOnly:!['mutate-source','legacy-fixture'].includes(body.method)});
           try{
             if(body.method==='peek'){
               const area=args[0];if(area!==0&&area!==1)throw new Error('Area mismatch');result=Object.fromEntries(['chat_meta','recent_messages','pending_changes','full_messages','historical_changes','snapshots','snapshot_messages'].map(n=>[n,[]]));
               for(const row of repo.db.prepare(`SELECT store,payload FROM ${area===0?'records':'records_next'} ORDER BY store,primary_key`).all())result[row.store].push(decodeStorageValue(JSON.parse(row.payload)));
+            }else if(body.method==='legacy-fixture'){
+              const [action,parameters]=args;if(!['prepare','seal','commit'].includes(action))throw new Error('Legacy fixture action mismatch');result=await repo.transfer(action,parameters);
             }else if(body.method==='mutate-source'){
               repo.db.prepare("UPDATE records SET payload=? WHERE store='chat_meta'").run(JSON.stringify(encodeStorageValue({chatKey:'source',changedDuringRestart:true})));result=true;
             }else throw new Error('Fixture method mismatch');
@@ -93,6 +97,7 @@ try{
   for(const viewport of [{width:1024,height:900},{width:390,height:760}]){
     await page.setViewportSize(viewport);await page.evaluate(()=>recoveryContract.uiCase());
     const dialog=page.locator('#boxed-lllllabc-transfer-dialog');await dialog.waitFor();
+    await page.evaluate(()=>recoveryContract.monitorUi({state:'initializing',stage:'upgrade-copy-verified',count:100000,elapsedMs:123000}));
     const geometry=await dialog.evaluate(node=>({width:node.getBoundingClientRect().width,client:node.clientWidth,scroll:node.scrollWidth,text:node.textContent,buttons:[...node.querySelectorAll('button')].map(b=>({text:b.textContent,disabled:b.disabled}))}));
     assert.ok(geometry.scroll<=geometry.client+1);assert.match(geometry.text,/继续核对并恢复/);uiChecks.push({viewport,geometry});
     if(process.env.BOXED_TEST_OUTPUT){await fs.mkdir(process.env.BOXED_TEST_OUTPUT,{recursive:true});await page.screenshot({path:path.join(process.env.BOXED_TEST_OUTPUT,`recovery-${viewport.width}.png`)});}
@@ -103,6 +108,7 @@ try{
   }
   await page.evaluate(()=>recoveryContract.uiCase('indexeddb','activated'));assert.equal(await page.getByRole('button',{name:'放弃本次迁移',exact:true}).count(),0);
   await page.getByRole('button',{name:'继续完成收尾'}).click();await page.waitForFunction(()=>globalThis.recoveryUiFinished);
+  if(!process.env.BOXED_UI_ONLY){const slow=await page.evaluate(()=>recoveryContract.slowLegacyCase());assert.ok(slow.elapsedMs>15000);assert.ok(slow.reports>3);results.push({stage:'legacy-recovery-real-route-over-15-seconds',...slow});}
   for(const viewport of [{width:1024,height:900},{width:390,height:760}]){
     await page.setViewportSize(viewport);await page.evaluate(()=>recoveryContract.logCase());
     const root=page.locator('#boxed-lllllabc-runtime-logs');assert.equal(await root.isVisible(),false);

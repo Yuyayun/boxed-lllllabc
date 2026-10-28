@@ -3,6 +3,7 @@ import { TRANSFER_STORES } from "../db/schema.js";
 import { DATA_STORES, TRANSFER_PAGE_BYTES, transferId, recordText, digestRow, readTransferManifest, sameManifest } from "./transfer-format.js";
 import { encodeStorageValue } from "./protocol.js";
 import { ALL_DATASET_STORES, ACTIVE_DATASET_KEY, datasetId } from "./dataset-layout.js";
+import {createIndexedDbBatchTransfer} from './indexeddb-batch-transfer.js';
 
 const request = (value) => new Promise((resolve, reject) => { value.onsuccess = () => resolve(value.result); value.onerror = () => reject(value.error); });
 const cursor = (store, callback, range) => new Promise((resolve, reject) => {
@@ -16,7 +17,8 @@ const cursor = (store, callback, range) => new Promise((resolve, reject) => {
   };
 });
 
-export function createIndexedDbTransfer({ openDatabase = openBackupDatabase } = {}) {
+export function createIndexedDbTransfer({ openDatabase = openBackupDatabase,onLegacyProgress=()=>{} } = {}) {
+  const recovery=createIndexedDbBatchTransfer({openDatabase,onLegacyProgress}).legacyRecovery;
   async function tx(mode, callback, allowUnknown = false) {
     const db = await openDatabase();
     try {
@@ -67,6 +69,7 @@ export function createIndexedDbTransfer({ openDatabase = openBackupDatabase } = 
   }
   return async function transfer(action, args) {
     const id = transferId(args?.id);
+    if(['rollback','finish'].includes(action))return recovery.run(id,action);
     if (action === "page") return page(args);
     if (action === "check") {
       const batch = await page(args);

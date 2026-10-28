@@ -22,7 +22,7 @@ import { createStorageControl } from "./src/storage/control.js";
 import { createManagedStorage, createOperationGate } from "./src/storage/managed.js";
 import { createTransferCoordinator } from "./src/storage/transfer.js";
 import { sha256 } from "./src/storage/transfer-format.js";
-import { createStorageSwitchUi } from "./src/ui/storage-switch.js";
+import { createStorageSwitchUi,legacyRecoveryProgressText } from "./src/ui/storage-switch.js";
 import { createRuntimeLogUi } from "./src/ui/runtime-log.js";
 import { createSnapshotController } from "./src/controllers/snapshot-controller.js";
 import { createSnapshotUi } from "./src/ui/snapshots.js";
@@ -40,7 +40,7 @@ const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
 
 const storageControl = createStorageControl();
 let runtimeLogUi;
-const adapters = { indexeddb: createIndexedDbStorage(), sqlite: createSqliteStorage({ getRequestHeaders,onStatus:health=>runtimeLogUi?.connection(health),onProgress:state=>switchUi?.monitor(state) }) };
+const adapters = { indexeddb: createIndexedDbStorage({onLegacyProgress:r=>switchUi?.progress(legacyRecoveryProgressText(r))}), sqlite: createSqliteStorage({ getRequestHeaders,onStatus:health=>runtimeLogUi?.connection(health),onProgress:state=>switchUi?.monitor(state) }) };
 const backupStorage = createManagedStorage({ control: storageControl, adapters });
 const operationGate = createOperationGate();
 let switchUi;

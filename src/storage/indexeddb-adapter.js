@@ -2,6 +2,7 @@ import * as database from "../db/index.js";
 import { createIndexedDbTransfer } from "./indexeddb-transfer.js";
 import { createIndexedDbBatchTransfer } from "./indexeddb-batch-transfer.js";
 import { BATCH_TRANSFER_VERSION, validateBatchCall } from "./protocol.js";
+import {migrationSpaceBudget} from './capacity-budget.js';
 
 // Keep compound operations in src/db/index.js: their validation and writes must
 // continue to run in the same IndexedDB transaction.
@@ -43,7 +44,7 @@ const OPERATIONS = Object.freeze({
  * Callers must close it in finally, including when an operation fails.
  * This adapter preserves database names, schemas and transaction boundaries.
  */
-export function createIndexedDbStorage({ openDatabase = database.openBackupDatabase } = {}) {
+export function createIndexedDbStorage({ openDatabase = database.openBackupDatabase,onLegacyProgress=()=>{} } = {}) {
   const batches = createIndexedDbBatchTransfer({ openDatabase });
   return Object.freeze({
     mode: "indexeddb",
@@ -53,9 +54,9 @@ export function createIndexedDbStorage({ openDatabase = database.openBackupDatab
       let estimate;
       try { estimate = await globalThis.navigator?.storage?.estimate?.(); }
       catch { return; }
-      if (Number.isFinite(estimate?.quota) && Number.isFinite(estimate?.usage) && estimate.quota - estimate.usage < manifest.bytes * 2) throw new Error("浏览器可用配额不足以保留暂存和回滚副本，未替换目标数据。");
+      if (Number.isFinite(estimate?.quota) && Number.isFinite(estimate?.usage) && estimate.quota - estimate.usage < migrationSpaceBudget(manifest,'indexeddb').requiredAdditionalBytes) throw new Error("浏览器可用配额不足以保留新数据区、索引及写入余量，未替换目标数据。");
     },
-    transfer: createIndexedDbTransfer({ openDatabase }),
+    transfer: createIndexedDbTransfer({ openDatabase,onLegacyProgress }),
     async open() {
       const db = await openDatabase();
       const session = { close: () => db.close() };

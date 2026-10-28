@@ -10,6 +10,7 @@ import { encodeStorageValue, decodeStorageValue } from '../../src/storage/protoc
 import { stableText } from '../../src/storage/value-digest.js';
 import { captureSnapshot } from '../../src/snapshots/model.js';
 import { snapshotBatches, readSnapshot } from '../../src/snapshots/service.js';
+import {emptyManifest} from '../../src/storage/transfer-format.js';
 
 const assert=(value,message)=>{if(!value)throw new Error(message);};
 const request=value=>new Promise((resolve,reject)=>{value.onsuccess=()=>resolve(value.result);value.onerror=()=>reject(value.error);});
@@ -103,6 +104,14 @@ export function installRecoveryContract(nonce) {
     expected.source=await peek(expected.from,0);sessionStorage.setItem('boxed-recovery-expected',JSON.stringify(encodeStorageValue(expected)));
   }
   globalThis.recoveryContract={start,recover,uiCase,mutateSource,restartWorker:()=>rpc('restart-worker'),state:()=>control.read(),
+    monitorUi:state=>ui.monitor(state),
+    async slowLegacyCase(){
+      const expected=await reset('indexeddb'),id='legacy-slow-case';await adapters.indexeddb.transfer('source',{id});
+      await rpc('legacy-fixture',['prepare',{id,manifest:await emptyManifest()}]);await rpc('legacy-fixture',['seal',{id}]);await rpc('legacy-fixture',['commit',{id}]);
+      await control.update(state=>({...state,journal:{id,from:'indexeddb',to:'sqlite',kind:'switch',phase:'working'}}));await rpc('slow-recovery-worker');let reports=0;const phases=new Set();
+      const sqlite=createSqliteStorage({getRequestHeaders:()=>({'X-Test-Nonce':nonce}),onProgress:state=>{reports++;if(state.stage?.startsWith('legacy-'))phases.add(state.stage);}}),legacy=createTransferCoordinator({control,adapters:{...adapters,sqlite},locks:navigator.locks});
+      const start=performance.now();await legacy.recover({confirmed:true});const elapsedMs=performance.now()-start;assert(!(await control.read()).journal,'Legacy recovery must finish');equal(await peek('indexeddb',0),expected.source,'Legacy source changed');equal(await peek('sqlite',0),expected.target,'Legacy target not restored');assert(phases.has('legacy-copy')&&phases.has('legacy-verify'),'Missing real recovery stage feedback');return {elapsedMs,reports,phases:[...phases]};
+    },
     async logCase(){
       ui?.close();await rpc('reset');logMemory.clear();
       document.body.innerHTML=await (await fetch('/settings.html')).text();document.querySelector('.inline-drawer-content').style.display='block';document.querySelector('#boxed-lllllabc-settings').style.cssText='max-width:700px;margin:0 auto';

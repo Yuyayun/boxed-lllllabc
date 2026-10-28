@@ -1,5 +1,6 @@
 import { STORAGE_PROTOCOL, STORAGE_OPERATIONS, BATCH_TRANSFER_VERSION, validateBatchCall, encodeStorageValue, decodeStorageValue } from "./protocol.js";
 import { readSupervisedResponse } from "./stream-response.js";
+import {migrationSpaceBudget} from './capacity-budget.js';
 
 export function createSqliteStorage({ fetchImpl = globalThis.fetch, getRequestHeaders = () => ({}), timeoutMs = 15000, onProgress = () => {}, onStatus = () => {} } = {}) {
   const base = "/api/plugins/boxed-lllllabc";
@@ -60,7 +61,8 @@ export function createSqliteStorage({ fetchImpl = globalThis.fetch, getRequestHe
       const health = await status();
       if (!health.ok) throw new Error(health.reason);
       const free = health.database?.availableBytes;
-      if (Number.isFinite(free) && free < manifest.bytes * 2 + health.database.bytes) throw new Error("服务器可用空间不足以保留暂存和回滚副本，未替换目标数据。");
+      const budget=migrationSpaceBudget(manifest,'sqlite');
+      if (Number.isFinite(free) && free < budget.requiredAdditionalBytes) throw new Error("服务器可用空间不足以保留新数据区、索引及 WAL 写入余量，未替换目标数据。");
     },
     async transfer(action, args) {
       const result = await request("transfer", { protocol: STORAGE_PROTOCOL, action, args: encodeStorageValue(args) });
