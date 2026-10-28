@@ -6,9 +6,9 @@ export function formatRuntimeLog(entry){
   for(const [key,label] of [['operation','操作'],['count','已清点'],['verified','已核验'],['batch','批次'],['bytes','字节'],['errorCode','错误'],['sqliteCode','SQLite 错误号'],['elapsedMs','耗时毫秒']])if(entry[key]!==undefined)parts.push(`${label}：${entry[key]}`);
   return parts.filter(value=>value!==undefined&&value!==null).join(' | ');
 }
-export function createRuntimeLogUi({storage,remember=globalThis.localStorage}={}){
+export function createRuntimeLogUi({storage,remember}={}){
   let known=false,connected=false,cursor=null,busy=false,modal;
-  try{known=remember?.getItem(KNOWN_KEY)==='1';}catch{/* Private browsers may disable preferences. */}
+  try{remember??=globalThis.localStorage;known=remember?.getItem(KNOWN_KEY)==='1';}catch{/* Private browsers may disable preferences. */}
   const root=document.querySelector('#boxed-lllllabc-runtime-logs');
   if(!root)return {connection(){},available:()=>known,open(){}};
   const body=root.querySelector('[data-log-body]'),message=root.querySelector('[data-log-message]'),output=root.querySelector('textarea'),filter=root.querySelector('select');
