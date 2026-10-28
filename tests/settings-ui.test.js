@@ -97,7 +97,7 @@ test("设置只按可写状态解锁切换和旧端入口，检查连接不改�
   try {
     const state = { active: "indexeddb", previous: "sqlite", lastTransfer: { id: "done" } };
     for (const writable of [false, undefined, true]) {
-      const ui = createStorageSwitchUi({ control: { read: async () => structuredClone(state) }, sqlite: { status: async () => ({ ok: true, database: { writable } }) }, coordinator: {} });
+      const ui = createStorageSwitchUi({ control: { read: async () => structuredClone(state) }, sqlite: { status: async () => ({ ok: true, database: { writable, batchTransfer: 3 } }) }, coordinator: {} });
       await ui.refresh(); assert.equal(nodes.get("#boxed-lllllabc-switch-storage").disabled, writable !== true); assert.equal(nodes.get("#boxed-lllllabc-clear-inactive").disabled, writable !== true);
       assert.equal(nodes.get("#boxed-lllllabc-storage-mode").textContent, "浏览器本地存储");
       assert.equal(nodes.get("#boxed-lllllabc-sqlite-state").textContent, writable ? "服务器备份插件已连接"
@@ -106,4 +106,13 @@ test("设置只按可写状态解锁切换和旧端入口，检查连接不改�
       assert.equal(state.active, "indexeddb");
     }
   } finally { globalThis.document = previousDocument; }
+});
+
+test('服务器可写但缺少新版迁移能力时不开放切换，不改变当前 IndexedDB',async()=>{
+  const previous=globalThis.document,nodes=new Map();globalThis.document={querySelector:key=>{if(!nodes.has(key))nodes.set(key,{});return nodes.get(key);}};
+  try{
+    const state={active:'indexeddb',previous:'sqlite',lastTransfer:'done-123'};
+    const ui=createStorageSwitchUi({control:{read:async()=>state},sqlite:{status:async()=>({ok:true,database:{writable:true,batchTransfer:2}})},coordinator:{}});
+    await ui.refresh();assert.equal(nodes.get('#boxed-lllllabc-switch-storage').disabled,true);assert.equal(nodes.get('#boxed-lllllabc-clear-inactive').disabled,true);assert.match(nodes.get('#boxed-lllllabc-sqlite-detail').textContent,/更新配套插件/);assert.equal(state.active,'indexeddb');
+  }finally{globalThis.document=previous;}
 });

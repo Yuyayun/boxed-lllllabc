@@ -1,4 +1,4 @@
-import { STORAGE_PROTOCOL, STORAGE_OPERATIONS, encodeStorageValue, decodeStorageValue } from "./protocol.js";
+import { STORAGE_PROTOCOL, STORAGE_OPERATIONS, BATCH_TRANSFER_VERSION, validateBatchCall, encodeStorageValue, decodeStorageValue } from "./protocol.js";
 
 export function createSqliteStorage({ fetchImpl = globalThis.fetch, getRequestHeaders = () => ({}), timeoutMs = 15000 } = {}) {
   const base = "/api/plugins/boxed-lllllabc";
@@ -38,6 +38,18 @@ export function createSqliteStorage({ fetchImpl = globalThis.fetch, getRequestHe
   }
   return Object.freeze({
     mode: "sqlite", status,
+    batchVersion: BATCH_TRANSFER_VERSION,
+    async batchTransfer(action, args) {
+      validateBatchCall(action, args, "sqlite");
+      const body = { protocol: STORAGE_PROTOCOL, action, args: encodeStorageValue(args) };
+      try {
+        const result = await request("batch-transfer", body);
+        return decodeStorageValue(result.value);
+      } catch (error) {
+        if (error.name === "AbortError" || error.name === "TimeoutError" || !error.code || typeof error.code !== "string") throw Object.assign(new Error("请求中断，分批迁移的结果尚待核对；备份保持锁定。", { cause: error }), { code: "outcome-unknown" });
+        throw error;
+      }
+    },
     async checkCapacity(manifest) {
       const health = await status();
       if (!health.ok) throw new Error(health.reason);

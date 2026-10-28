@@ -12,6 +12,12 @@
 }
 #boxed-lllllabc-transfer-dialog::backdrop { background: rgb(0 0 0 / 75%); }
 #boxed-lllllabc-transfer-dialog p { white-space: pre-wrap; }
+#boxed-lllllabc-transfer-dialog strong { display: block; margin-block-end: 0.5rem; }
+#boxed-lllllabc-transfer-dialog small { display: block; margin-block-start: 1rem; line-height: 1.5; }
+#boxed-lllllabc-transfer-dialog p,
+#boxed-lllllabc-transfer-dialog small { overflow-wrap: anywhere; }
+#boxed-lllllabc-transfer-dialog .boxed-lllllabc-transfer-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-block-start: 1rem; }
+#boxed-lllllabc-transfer-dialog .boxed-lllllabc-transfer-actions > .menu_button { margin: 0; max-inline-size: 100%; box-sizing: border-box; }
 #boxed-lllllabc-transfer-dialog label { display: flex; gap: 0.65rem; margin-block: 1rem; align-items: start; }
 #boxed-lllllabc-transfer-dialog .menu_button {
   display: inline-flex;

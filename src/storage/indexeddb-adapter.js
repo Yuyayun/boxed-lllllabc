@@ -1,5 +1,7 @@
 import * as database from "../db/index.js";
 import { createIndexedDbTransfer } from "./indexeddb-transfer.js";
+import { createIndexedDbBatchTransfer } from "./indexeddb-batch-transfer.js";
+import { BATCH_TRANSFER_VERSION, validateBatchCall } from "./protocol.js";
 
 // Keep compound operations in src/db/index.js: their validation and writes must
 // continue to run in the same IndexedDB transaction.
@@ -42,8 +44,11 @@ const OPERATIONS = Object.freeze({
  * This adapter preserves database names, schemas and transaction boundaries.
  */
 export function createIndexedDbStorage({ openDatabase = database.openBackupDatabase } = {}) {
+  const batches = createIndexedDbBatchTransfer({ openDatabase });
   return Object.freeze({
     mode: "indexeddb",
+    batchVersion: BATCH_TRANSFER_VERSION,
+    batchTransfer(action, args) { validateBatchCall(action, args, "indexeddb"); return batches[action](...args); },
     async checkCapacity(manifest) {
       let estimate;
       try { estimate = await globalThis.navigator?.storage?.estimate?.(); }

@@ -86,6 +86,7 @@ let backendVerifier;
 let catalogController;
 let restoreController;
 let panelController;
+let storageRecoveryPending = false;
 let backupEvents = null;
 let pageLifecycle = null;
 let settingsController = null;
@@ -358,7 +359,14 @@ jQuery(async () => {
 
   switchUi = createStorageSwitchUi({
     control: storageControl, sqlite: adapters.sqlite, coordinator: transferCoordinator, isGenerating,
-    afterChange: async () => { await backupStorage.refresh(); await panelController.refreshVisiblePanel(); await storageController.refresh(); },
+    afterChange: async () => {
+      await backupStorage.refresh();
+      if (storageRecoveryPending) {
+        setStatus(await runBackupNow({ eventName: "storage-recovery-complete", args: [] }));
+        storageRecoveryPending = false;
+      }
+      await panelController.refreshVisiblePanel(); await storageController.refresh();
+    },
   });
   switchUi.bind();
   try {
@@ -366,6 +374,7 @@ jQuery(async () => {
     await transferCoordinator.recover();
     await switchUi.refresh();
   } catch (error) {
+    storageRecoveryPending = true;
     await operationGate.pause();
     await switchUi.failure(error);
     setStatus(createBackupStatus("db-error", "存储操作待恢复"));

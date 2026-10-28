@@ -52,11 +52,12 @@ test('恢复按持久激活记录选择收尾或回滚；后端失联保留任�
     const calls=[];let resumed=0;const control=controlWith({active:phase==='activated'?'sqlite':'indexeddb',journal:{id:'recover-123',kind:'switch',from:'indexeddb',to:'sqlite',phase}});
     const adapters=Object.fromEntries(['indexeddb','sqlite'].map(mode=>[mode,{transfer:async(action)=>{calls.push([mode,action]);return {phase:'committed'};}}]));
     const coordinator=createTransferCoordinator({control,adapters,locks:{request:async(_n,_o,fn)=>fn()},resume:async()=>{resumed++;}});
-    await coordinator.recover();assert.equal((await control.read()).journal,null);assert.equal(resumed,1);
+    await assert.rejects(coordinator.recover(),e=>e.code==='recovery-required');
+    await coordinator.recover({confirmed:true});assert.equal((await control.read()).journal,null);assert.equal(resumed,1);
     assert.deepEqual(calls.map(c=>c[1]),['status',phase==='activated'?'finish':'rollback',phase==='activated'?'finish':'rollback']);
   }
   const control=controlWith({journal:{id:'recover-123',kind:'switch',from:'indexeddb',to:'sqlite',phase:'working'}});let resumed=false;
-  await assert.rejects(createTransferCoordinator({control,adapters:{sqlite:{transfer:async()=>{throw new Error('断网');}}},locks:{request:async(_n,_o,fn)=>fn()},resume:async()=>{resumed=true;}}).recover(),/断网/);
+  await assert.rejects(createTransferCoordinator({control,adapters:{sqlite:{transfer:async()=>{throw new Error('断网');}}},locks:{request:async(_n,_o,fn)=>fn()},resume:async()=>{resumed=true;}}).recover({confirmed:true}),/断网/);
   assert.ok((await control.read()).journal);assert.equal(resumed,false);
 });
 test('清单校验所有仓库、序号、主键和关联；属性顺序不影响摘要，原始特殊字段保留',async()=>{

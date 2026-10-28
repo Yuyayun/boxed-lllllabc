@@ -15,7 +15,7 @@ export function createIndexedDbBatchTransfer({ openDatabase = openBackupDatabase
       const db = await openDatabase();
       try {
         return await new Promise((resolve, reject) => {
-          const tx = db.transaction([...ALL_DATASET_STORES, TRANSFER_STORES.meta], mode);
+          const tx = db.transaction([...ALL_DATASET_STORES, TRANSFER_STORES.meta], mode, mode === "readwrite" ? { durability: "strict" } : undefined);
           const meta = tx.objectStore(TRANSFER_STORES.meta);
           let value;
           tx.oncomplete = () => resolve(value);
@@ -27,8 +27,22 @@ export function createIndexedDbBatchTransfer({ openDatabase = openBackupDatabase
               for (const name of db.objectStoreNames) if (![...ALL_DATASET_STORES, ...Object.values(TRANSFER_STORES)].includes(name)) throw new Error("发现未知仓库，未修改原数据。");
             },
             metaGet: get, metaPut: put,
+            metaDelete: key => request(meta.delete(key)),
+            metaKeys(prefix, after = "", limit = 100) {
+              return new Promise((resolve, reject) => {
+                const keys = [], read = meta.openKeyCursor(IDBKeyRange.lowerBound(after || prefix, !!after));
+                read.onerror = () => reject(read.error);
+                read.onsuccess = () => {
+                  const item = read.result;
+                  if (!item || typeof item.key !== "string" || !item.key.startsWith(prefix) || keys.length >= limit) return resolve(keys);
+                  keys.push(item.key); item.continue();
+                };
+              });
+            },
             active: () => get(ACTIVE_DATASET_KEY), revision: async () => await get("revision") ?? 0,
+            activePut: value => put(ACTIVE_DATASET_KEY, value), revisionPut: value => put("revision", value),
             lockGet: () => get("lock"), lockPut: id => put("lock", id),
+            lockDelete: () => request(meta.delete("lock")),
             taskGet: id => request(meta.get(id)), taskPut: state => request(meta.put({ ...state, key: state.id })),
             get: (dataset, name, key) => request(tx.objectStore(datasetStore(name, dataset)).get(key)),
             has: async (dataset, name, key) => (await request(tx.objectStore(datasetStore(name, dataset)).count(key))) > 0,
