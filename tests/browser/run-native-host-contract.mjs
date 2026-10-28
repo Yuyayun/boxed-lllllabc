@@ -1,0 +1,62 @@
+import fs from'node:fs';import path from'node:path';import assert from'node:assert/strict';import{fileURLToPath,pathToFileURL}from'node:url';
+if(!process.env.BOXED_NATIVE_CASE_ROOT||!process.env.BOXED_STAGE5_ROOT)throw new Error('Disposable native case and stage5 roots required');
+const{chromium}=await import(process.env.BOXED_PLAYWRIGHT_PATH?pathToFileURL(process.env.BOXED_PLAYWRIGHT_PATH).href:'playwright');const root=fs.realpathSync(process.env.BOXED_NATIVE_CASE_ROOT),version=process.argv[2]??'1.15.0';
+assert.equal(path.dirname(root),path.join(fs.realpathSync(process.env.BOXED_STAGE5_ROOT),'cases'));const marker=JSON.parse(fs.readFileSync(path.join(root,'native-case.json'),'utf8'));assert.equal(marker.purpose,'boxed-stage5-disposable');assert.equal(marker.version,version);
+const context=await chromium.launchPersistentContext(path.join(root,`browser-profile-p7-native-${version}-${Date.now()}`),{executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',headless:true,viewport:{width:1440,height:1000}});
+const checks=[],files=[];let page;
+const standalone=process.env.BOXED_NATIVE_STANDALONE==='1';
+try{
+ page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.exposeFunction('p7Note',text=>console.log('STAGE',text));
+ await page.exposeFunction('p7VerifyDisk',async({avatar,chatId,chat,uuid,stage})=>{const file=path.join(root,'data/default-user/chats',avatar.replace(/\.png$/i,''),chatId+'.jsonl');const rows=fs.readFileSync(file,'utf8').trim().split('\n').map(JSON.parse);assert.equal(rows[0].chat_metadata.integrity,uuid);assert.equal(rows.length-1,chat.length);for(let i=0;i<chat.length;i++){assert.equal(rows[i+1].mes,chat[i].mes);if(chat[i].swipes)assert.deepEqual(rows[i+1].swipes,chat[i].swipes);if(chat[i].swipe_id!==undefined)assert.equal(rows[i+1].swipe_id,chat[i].swipe_id);}files.push({stage,file,messages:chat.length});});
+ await page.goto('http://127.0.0.1:18101/');await page.waitForFunction(()=>Boolean(globalThis.boxedLllllabcDebug)&&Boolean(document.querySelector('#boxed-lllllabc-open-catalog')));
+ const result=await page.evaluate(async ({version,standalone})=>{
+  const base='/scripts/extensions/third-party/boxed-lllllabc/src/',st=await import('/script.js'),ext=await import('/scripts/extensions.js'),slash=await import('/scripts/slash-commands.js');
+  const settings=ext.extension_settings['boxed-lllllabc'];settings.enabled=false;st.saveSettingsDebounced();
+  const post=async(url,body)=>{const r=await fetch(url,{method:'POST',headers:st.getRequestHeaders(),body:JSON.stringify(body)});if(!r.ok)throw new Error(url);return r.json();};
+  const duplicate=await post('/api/characters/duplicate',{avatar_url:'default_Seraphina.png'}),avatar=duplicate.path;await ext.getContext().getCharacters();await st.selectCharacterById(ext.getContext().characters.findIndex(c=>c.avatar===avatar));
+  const {createContextReader}=await import(base+'context.js'),reader=createContextReader({getContext:ext.getContext}),{createStorageControl}=await import(base+'storage/control.js'),control=createStorageControl();
+  const adapters={indexeddb:(await import(base+'storage/indexeddb-adapter.js')).createIndexedDbStorage(),sqlite:(await import(base+'storage/sqlite-client.js')).createSqliteStorage({getRequestHeaders:st.getRequestHeaders})};
+  const storage=(await import(base+'storage/managed.js')).createManagedStorage({control,adapters}),coordinator=(await import(base+'storage/transfer.js')).createTransferCoordinator({control,adapters});
+  const use=async fn=>{const s=await storage.open();try{return await fn(s);}finally{s.close();}},pause=ms=>new Promise(r=>setTimeout(r,ms)),assert=(v,m)=>{if(!v)throw new Error(m);};
+  const models=await import(base+'backup/restore.js'),{executeRestorePlan}=await import(base+'backup/restore-executor.js'),{renderRestoredMessages}=await import(base+'controllers/restore-controller.js'),{createPendingRecords}=await import(base+'backup/pending.js'),bookmarks=await import('/scripts/bookmarks.js');
+  const snapshots=(await import(base+'controllers/snapshot-controller.js')).createSnapshotController({storage,getContextReader:()=>reader,isGenerating:st.isGenerating});
+  const rows=[];
+  const disk=async stage=>{const c=ext.getContext();await c.saveChat();await window.p7VerifyDisk({avatar,chatId:c.chatId,chat:JSON.parse(JSON.stringify(c.chat)),uuid:c.chatMetadata.integrity,stage});};
+  const restore=async(plan,mode,type)=>{assert(!plan.blockedReason,plan.blockedReason);const r=await executeRestorePlan({plan,readCurrent:()=>reader.readCurrentChat(),readPending:key=>use(s=>s.getPendingChanges(key)),writePending:records=>use(s=>s.putPendingChanges(records)),replacePending:records=>use(s=>s.replacePendingChanges({chatKey:plan.chatKey,records})),render:renderRestoredMessages,save:async({current})=>{await current.context.saveChat();return{ok:true,status:'completed'};}});assert(r.ok,r.reason);await disk(`${mode}/${type}`);};
+  for(const mode of standalone?['indexeddb']:['indexeddb','sqlite']){
+   settings.enabled=false;if(mode==='sqlite')await coordinator.switchTo('sqlite',{confirmed:true});
+   const target=`P7-${version}-${mode}-${Date.now()}`;
+   await post('/api/chats/save',{ch_name:ext.getContext().name2,avatar_url:avatar,file_name:target,chat:[{chat_metadata:{integrity:crypto.randomUUID()}},{name:'P7虚构角色',is_user:false,mes:'原生测试起点'}],force:false});
+   if(typeof st.updateRemoteChatName==='function')await st.updateRemoteChatName(ext.getContext().characterId,target);
+   await ext.getContext().openCharacterChat(target);await pause(500);let c=ext.getContext();assert(c.chatId===target,'原生当前聊天缓存未稳定');await window.p7Note(`${mode}/opened ${c.chatId}`);
+   c.chat.splice(0,c.chat.length,{name:'P7虚构角色',is_user:false,mes:'原始旧楼层',swipes:['原始旧楼层','候选乙'],swipe_id:0,extra:{p7:true}},{name:'P7用户',is_user:true,mes:'第二楼层',extra:{p7:true}},{name:'P7虚构角色',is_user:false,mes:'第三楼层',extra:{p7:true}});await c.clearChat();await c.printMessages();await disk(`${mode}/initial`);
+   settings.enabled=true;settings.recentBackupEnabled=true;settings.fullBackupEnabled=true;settings.historicalBackupEnabled=true;settings.recentLimit=2;await globalThis.boxedLllllabcDebug.refreshNow();
+   await window.p7Note(`${mode}/before-send ${ext.getContext().chatId}`);await st.sendMessageAsUser('P7原生用户发送','');await slash.sendMessageAs({name:'P7虚构角色'},'P7原生助手消息');await pause(600);await globalThis.boxedLllllabcDebug.refreshNow();await disk(`${mode}/native-send`);await window.p7Note(`${mode}/sent`);
+   const key=reader.readCurrentChat().identity.chatKey;assert((await use(s=>s.getFullMessages(key))).length===5,'完整备份未触发');assert((await use(s=>s.getRecentMessages(key))).length===2,'最近备份未触发');
+   c=ext.getContext();c.chat[0].mes='P7旧楼层编辑';c.chat[0].swipes[0]='P7旧楼层编辑';await st.eventSource.emit(st.event_types.MESSAGE_EDITED,0);await c.saveChat();await pause(600);await globalThis.boxedLllllabcDebug.refreshNow();
+   const historical=await use(s=>s.getHistoricalChanges(key));assert(historical.some(r=>r.messageIndex===0),'历史变更未触发');
+   const last=ext.getContext().chat.length-1;st.ensureSwipes(ext.getContext().chat[last]);ext.getContext().chat[last].swipes.push('P7原生候选');st.syncSwipeToMes(last,1);await st.eventSource.emit(st.event_types.MESSAGE_SWIPED,last);await ext.getContext().saveChat();await pause(600);await globalThis.boxedLllllabcDebug.refreshNow();assert(ext.getContext().chat[last].swipe_id===1,'候选切换失败');
+   await st.deleteMessage(last);await ext.getContext().saveChat();await pause(600);await globalThis.boxedLllllabcDebug.refreshNow();assert((await use(s=>s.getFullMessages(key))).length===4,'主动删层未按既有规则重建完整备份');
+   settings.enabled=false;const recent=await use(s=>s.getRecentMessages(key)),full=await use(s=>s.getFullMessages(key));
+   c.chat.splice(recent[0].messageIndex);await c.clearChat();await c.printMessages();await disk(`${mode}/truncated`);
+   let pending=await use(s=>s.getPendingChanges(key));await restore(models.createRecentRestorePlan({chat:c.chat,chatKey:key,recent,pending,endIndex:recent.at(-1).messageIndex}),mode,'recent-restore');
+   c=ext.getContext();c.chat[0].mes='历史恢复前';pending=await use(s=>s.getPendingChanges(key));await restore(models.createHistoricalRestorePlan({chat:c.chat,chatKey:key,historical,pending,messageIndex:0}),mode,'historical-restore');
+   c=ext.getContext();c.chat.splice(1);pending=await use(s=>s.getPendingChanges(key));await restore(models.createFullRestorePlan({chat:c.chat,chatKey:key,fullMessages:full,pending}),mode,'full-restore');
+   c=ext.getContext();const desired=structuredClone(c.chat),tail=desired.length-1;desired[tail].mes='P7待保存内容恢复';const records=createPendingRecords({chat:desired,chatKey:key,eventName:'message_edited',args:[tail]});await use(s=>s.replacePendingChanges({chatKey:key,records}));c.chat[tail].mes='尚未保存的占位';await restore(models.createPendingRestorePlan({chat:c.chat,chatKey:key,pending:records}),mode,'pending-restore');
+   assert(ext.getContext().chat.at(-1).mes==='P7待保存内容恢复','pending恢复内容不符');
+   const beforeSnapshot=await snapshots.create({name:'P7角色快照实际恢复'});ext.getContext().chat.at(-1).mes='快照恢复前改写';await disk(`${mode}/snapshot-edited`);const snapshotPreview=await snapshots.preview(beforeSnapshot.header.id);const snapshotRestored=await snapshots.restore(snapshotPreview.restore,{confirmed:true});assert(snapshotRestored.ok&&snapshotRestored.confirmed,snapshotRestored.reason);assert(ext.getContext().chat.at(-1).mes==='P7待保存内容恢复','角色快照恢复不符');await disk(`${mode}/snapshot-restore`);
+   settings.enabled=true;await pause(500);await globalThis.boxedLllllabcDebug.refreshNow();
+   const parentId=ext.getContext().chatId,parentUUID=ext.getContext().chatMetadata.integrity,parentCount=(await use(s=>s.getFullMessages(key))).length;
+   const branch=await bookmarks.createBranch(1);assert(branch,'原生Branch未创建');await ext.getContext().openCharacterChat(branch);await pause(500);await globalThis.boxedLllllabcDebug.refreshNow();const branchKey=reader.readCurrentChat().identity.chatKey,branchUUID=ext.getContext().chatMetadata.integrity;assert(branchKey!==key,'Branch身份串档');assert((await use(s=>s.getFullMessages(key))).length===parentCount,'父备份被覆盖');
+   assert(version==='1.15.0'?branchUUID===parentUUID:branchUUID!==parentUUID,'原生Branch UUID行为不符');
+   const checkpoint=await bookmarks.createNewBookmark(1,{forceName:`P7 checkpoint ${mode} ${Date.now()}`});assert(checkpoint,'原生Checkpoint未创建');await ext.getContext().openCharacterChat(checkpoint);await pause(500);await globalThis.boxedLllllabcDebug.refreshNow();const checkpointKey=reader.readCurrentChat().identity.chatKey;assert(checkpointKey!==branchKey&&checkpointKey!==key,'Checkpoint身份串档');
+   const snapshot=await snapshots.create({name:'Rename保持快照'}),renamed=`P7-renamed-${mode}-${Date.now()}`;await st.renameChat(checkpoint,renamed);await pause(500);await globalThis.boxedLllllabcDebug.refreshNow();const renameKey=reader.readCurrentChat().identity.chatKey;assert(renameKey!==checkpointKey,'Rename未更新身份');assert((await use(s=>s.getFullMessages(checkpointKey))).length===0,'Rename遗留旧普通记录');assert((await use(s=>s.getSnapshotHeader(snapshot.header.id))).chatKey===renameKey,'Rename未接续快照');
+   await ext.getContext().openCharacterChat(parentId);await pause(500);assert(reader.readCurrentChat().identity.chatKey===key,'父聊天身份变化');assert((await use(s=>s.getFullMessages(key))).length===parentCount,'返回后父备份变化');
+   settings.enabled=false;st.saveSettingsDebounced();rows.push({mode,chatKey:key,branchKey,checkpointKey,renameKey,parentUUID,branchUUID,fourRestores:true,historical:true,nativeSend:true,nativeSwipe:true,nativeDelete:true,renameSnapshot:snapshot.header.id});
+  }
+  settings.enabled=false;st.saveSettingsDebounced();return rows;
+ },{version,standalone});
+ const logs=await page.locator('#boxed-lllllabc-runtime-logs').evaluate(node=>({hidden:node.hidden,open:node.open}));assert.equal(logs.hidden,standalone);assert.equal(logs.open,false);
+ checks.push(...result);assert.deepEqual(errors,[]);const report={time:new Date().toISOString(),version,standalone,logs,checks,files,pageErrors:errors,note:'发送使用酒馆原生用户/助手追加函数；编辑使用原生事件与保存端口；四类恢复调用生产执行器及真实重绘/保存，每步从磁盘核对。未调用外部模型。'};fs.writeFileSync(path.join(root,`native-host-${version}.json`),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
+}catch(error){if(page)await page.screenshot({path:path.join(root,`native-host-failed-${version}.png`)});throw error;}finally{await context.close();}
