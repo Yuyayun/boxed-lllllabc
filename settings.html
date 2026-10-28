@@ -62,6 +62,17 @@
           </dl>
           <p class="boxed-lllllabc-settings-help">服务器备份插件可选。安装或检查连接不会切换备份位置，也不会自动迁移。</p>
           <p id="boxed-lllllabc-sqlite-detail" class="boxed-lllllabc-settings-help" hidden></p>
+          <details id="boxed-lllllabc-runtime-logs" hidden>
+            <summary>查看运行日志</summary>
+            <div data-log-body class="boxed-lllllabc-log-body">
+              <label>筛选 <select aria-label="日志类别"><option value="error">异常</option><option value="migration">迁移</option><option value="daily">日常</option><option value="all">全部</option></select></label>
+              <p data-log-message role="status">展开后读取服务器日志，每页最多 50 条。</p>
+              <textarea readonly rows="9" aria-label="当前页运行日志"></textarea>
+              <div class="boxed-lllllabc-log-actions"><button type="button" class="menu_button" data-log-refresh>刷新</button><button type="button" class="menu_button" data-log-older>更早记录</button><button type="button" class="menu_button" data-log-copy>复制当前页</button></div>
+              <label><input type="checkbox" />我确认清理已结束任务的日志，未结束任务和迁移登记保留。</label>
+              <button type="button" class="menu_button" data-log-cleanup disabled>清理已结束日志</button>
+            </div>
+          </details>
           <div class="boxed-lllllabc-storage-actions">
             <button id="boxed-lllllabc-check-storage" class="menu_button boxed-lllllabc-action-button" type="button"><i class="fa-solid fa-plug" aria-hidden="true"></i><span>检查服务器连接</span></button>
             <button id="boxed-lllllabc-switch-storage" class="menu_button boxed-lllllabc-action-button" type="button" disabled><i class="fa-solid fa-right-left" aria-hidden="true"></i><span>切换备份位置</span></button>

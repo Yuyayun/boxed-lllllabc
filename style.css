@@ -1,5 +1,6 @@
 @import url("./styles/settings.css");
 @import url("./styles/storage-switch.css");
+@import url("./styles/runtime-log.css");
 @import url("./styles/snapshots.css");
 @import url("./styles/batch-cleanup.css");
 

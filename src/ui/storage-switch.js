@@ -6,10 +6,11 @@ export function storageChangeDescription(kind, from, to) {
     ? `将备份从“${names[from]}”切换到“${names[to]}”。新位置已有的备份会被覆盖，不会合并。切换成功后，原位置的备份仍会保留。`
     : `将删除原存储位置“${names[to]}”中的普通备份、未保存变更和聊天快照，此操作不可撤销。当前使用位置“${names[from]}”的备份、备份设置及酒馆聊天文件不受影响。`;
 }
-export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerating = () => false, afterChange = async () => {} }) {
+export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerating = () => false, afterChange = async () => {},canReadLogs=()=>false,onLogs=()=>{} }) {
   let modal;
   let progressText;
   let pausing = false;
+  let monitorText;
   let resultSelector = '#boxed-lllllabc-transfer-result';
   const text = (selector, value) => { const node = document.querySelector(selector); if (node) node.textContent = value; };
   function close() { modal?.close(); modal?.remove(); modal = null; }
@@ -43,6 +44,8 @@ export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerati
     });
     node.addEventListener('keyup',(event)=>event.stopPropagation());
     const boundary=document.createElement('small'); boundary.textContent='当前页面已锁定。其他插件或外部程序直接修改聊天无法完全拦截；检测到当前聊天变化会停止提交。'; node.append(boundary);
+    monitorText=document.createElement('small');node.append(monitorText);
+    if(canReadLogs())button('查看运行日志',onLogs);
     if (running && coordinator.requestPause && coordinator.canPause?.()!==false) {
       const pauseButton=button('暂停任务',()=>{
         pausing=true; pauseButton.disabled=true; coordinator.requestPause();
@@ -136,5 +139,5 @@ export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerati
     document.querySelector('#boxed-lllllabc-clear-inactive')?.addEventListener('click',()=>confirm('clear').catch(failure));
     document.querySelector('#boxed-lllllabc-check-storage')?.addEventListener('click',()=>{ resultSelector='#boxed-lllllabc-transfer-result'; refresh().then(afterChange).catch(failure); });
   }
-  return { bind, refresh, block, close, failure, progress(message) { if (progressText) progressText.textContent=pausing?`${message}\n已请求暂停，将在当前步骤结束后停下。`:message; } };
+  return { bind, refresh, block, close, failure,monitor(state){if(monitorText?.isConnected){const labels={initializing:'服务器正在准备存储',slow:'当前步骤较慢，仍在等待有效进展',working:'服务器正在处理',idle:'服务器已完成当前步骤','no-progress':'长时间没有有效进展，结果需要核对',unresponsive:'服务器工作线程暂未回复，结果需要核对',unavailable:'服务器工作线程不可用'};monitorText.textContent=`${labels[state.state]??'正在等待服务器'}；已等待 ${Math.floor((state.elapsedMs??0)/1000)} 秒。存活报告不表示核验完成。`;}},progress(message) { if (progressText) progressText.textContent=pausing?`${message}\n已请求暂停，将在当前步骤结束后停下。`:message; } };
 }

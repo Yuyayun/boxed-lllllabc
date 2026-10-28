@@ -4,6 +4,7 @@ import { createSqliteStorage } from '../../src/storage/sqlite-client.js';
 import { createStorageControl } from '../../src/storage/control.js';
 import { createTransferCoordinator } from '../../src/storage/transfer.js';
 import { createStorageSwitchUi } from '../../src/ui/storage-switch.js';
+import {createRuntimeLogUi} from '../../src/ui/runtime-log.js';
 import { DATASET_NAMES, datasetStore } from '../../src/storage/dataset-layout.js';
 import { encodeStorageValue, decodeStorageValue } from '../../src/storage/protocol.js';
 import { stableText } from '../../src/storage/value-digest.js';
@@ -21,6 +22,7 @@ export function installRecoveryContract(nonce) {
     const body=await response.json();if(!body.ok)throw new Error(body.message);return decodeStorageValue(body.value);
   };
   const control=createStorageControl();
+  let logsUi;const logMemory=new Map(),remember={getItem:key=>logMemory.get(key),setItem:(key,value)=>logMemory.set(key,value)};
   const adapters={indexeddb:createIndexedDbStorage(),sqlite:createSqliteStorage({getRequestHeaders:()=>({'X-Test-Nonce':nonce,'X-CSRF-Token':nonce}),fetchImpl:(url,options)=>{
     if(dropCommit&&url.endsWith('/batch-transfer')&&JSON.parse(options.body).action==='commit'){dropCommit=false;options={...options,headers:{...options.headers,'X-Test-Drop':'1'}};}return fetch(url,options);
   }})};
@@ -101,6 +103,18 @@ export function installRecoveryContract(nonce) {
     expected.source=await peek(expected.from,0);sessionStorage.setItem('boxed-recovery-expected',JSON.stringify(encodeStorageValue(expected)));
   }
   globalThis.recoveryContract={start,recover,uiCase,mutateSource,restartWorker:()=>rpc('restart-worker'),state:()=>control.read(),
+    async logCase(){
+      ui?.close();await rpc('reset');logMemory.clear();
+      document.body.innerHTML=await (await fetch('/settings.html')).text();document.querySelector('.inline-drawer-content').style.display='block';document.querySelector('#boxed-lllllabc-settings').style.cssText='max-width:700px;margin:0 auto';
+      for(const node of document.querySelectorAll('[data-settings-group]'))if(node.dataset.settingsGroup!=='storage')node.hidden=true;
+      logsUi=createRuntimeLogUi({storage:adapters.sqlite,remember});Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async text=>{globalThis.copiedLogs=text;}}});
+      for(let i=0;i<60;i++)await adapters.sqlite.logEvent({taskId:'ui-pending-task',from:'indexeddb',to:'sqlite',kind:'switch',stage:'batch-verified',verified:i});
+      for(const [stage,errorCode] of [['error','injected'],['recover'],['completed']])await adapters.sqlite.logEvent({taskId:'ui-error-done',from:'indexeddb',to:'sqlite',kind:'switch',stage,...(errorCode?{errorCode}:{})});
+    },
+    logConnection(online){logsUi.connection(online?{ok:true,capabilities:{logs:1}}:{ok:false});},
+    logRecreate(){const old=document.querySelector('#boxed-lllllabc-runtime-logs');old.replaceWith(old.cloneNode(true));logsUi=createRuntimeLogUi({storage:adapters.sqlite,remember});logsUi.connection({ok:false});},
+    logOpen(){logsUi.open();},
+    async logRemaining(){const result=await adapters.sqlite.readLogs({category:'all',limit:100});return result.entries.length===60&&result.entries.every(x=>x.taskId==='ui-pending-task');},
     async controlSchemaTest(){
       await request(indexedDB.deleteDatabase('boxed-lllllabc-control'));
       const legacy=await new Promise((resolve,reject)=>{

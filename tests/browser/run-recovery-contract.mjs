@@ -26,8 +26,9 @@ async function install(reset=false) {
 const server=http.createServer(async(req,res)=>{
   try{
     const pathname=new URL(req.url,'http://127.0.0.1').pathname;
+    if(pathname==='/settings.html'){res.setHeader('Content-Type','text/html; charset=utf-8');res.end(await fs.readFile(path.join(root,'settings.html')));return;}
     if(pathname==='/recovery-contract'){
-      res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/tavern/style.css"><link rel="stylesheet" href="/styles/storage-switch.css"><style>body{font-family:system-ui,sans-serif;font-size:16px}#boxed-lllllabc-transfer-dialog{overflow-wrap:anywhere}</style><body><script type="module">import {installRecoveryContract} from '/tests/browser/recovery-contract.js';installRecoveryContract(${JSON.stringify(nonce)});</script></body></html>`);return;
+      res.setHeader('Content-Type','text/html; charset=utf-8');res.end(`<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/tavern/style.css"><link rel="stylesheet" href="/styles/settings.css"><link rel="stylesheet" href="/styles/runtime-log.css"><link rel="stylesheet" href="/styles/storage-switch.css"><style>body{font-family:system-ui,sans-serif;font-size:16px}#boxed-lllllabc-transfer-dialog{overflow-wrap:anywhere}</style><body><script type="module">import {installRecoveryContract} from '/tests/browser/recovery-contract.js';installRecoveryContract(${JSON.stringify(nonce)});</script></body></html>`);return;
     }
     if(pathname==='/fixture'||pathname.startsWith('/api/plugins/boxed-lllllabc/')){
       if(req.headers['x-test-nonce']!==nonce)throw new Error('Fixture nonce mismatch');
@@ -55,6 +56,7 @@ const server=http.createServer(async(req,res)=>{
       const route=handlers.get(req.method+' '+pathname.slice('/api/plugins/boxed-lllllabc'.length));if(!route){res.writeHead(404).end();return;}
       req.body=body;req.protocol='http';req.get=name=>req.headers[name.toLowerCase()];req.user={profile:{handle:'default-user',enabled:true}};req.session={handle:'default-user'};
       res.set=(name,value)=>res.setHeader(name,value);res.status=code=>{res.statusCode=code;return res;};res.json=value=>{if(req.headers['x-test-drop']==='1'){res.destroy();return;}res.setHeader('Content-Type','application/json');res.end(JSON.stringify(value));};
+      const originalWrite=res.write.bind(res);res.write=(chunk,...args)=>{if(req.headers['x-test-drop']==='1'&&String(chunk).includes('"type":"result"')){res.destroy();return false;}return originalWrite(chunk,...args);};
       await route(req,res);return;
     }
     let base=root,relativeUrl=pathname;
@@ -101,6 +103,23 @@ try{
   }
   await page.evaluate(()=>recoveryContract.uiCase('indexeddb','activated'));assert.equal(await page.getByRole('button',{name:'放弃本次迁移',exact:true}).count(),0);
   await page.getByRole('button',{name:'继续完成收尾'}).click();await page.waitForFunction(()=>globalThis.recoveryUiFinished);
+  for(const viewport of [{width:1024,height:900},{width:390,height:760}]){
+    await page.setViewportSize(viewport);await page.evaluate(()=>recoveryContract.logCase());
+    const root=page.locator('#boxed-lllllabc-runtime-logs');assert.equal(await root.isVisible(),false);
+    await page.evaluate(()=>recoveryContract.logConnection(true));assert.equal(await root.isVisible(),true);assert.equal(await root.getAttribute('open'),null);
+    await root.locator('summary').click();await page.waitForFunction(()=>document.querySelector('[data-log-message]').textContent.startsWith('本页'));
+    assert.match(await root.locator('textarea').inputValue(),/injected/);
+    await root.locator('select').selectOption('all');await page.waitForFunction(()=>document.querySelector('[data-log-message]').textContent.includes('本页 50 条'));
+    await page.getByRole('button',{name:'复制当前页'}).click();await page.waitForFunction(()=>document.querySelector('[data-log-message]').textContent.includes('已复制'));assert.equal(await page.evaluate(()=>globalThis.copiedLogs),await root.locator('textarea').inputValue());
+    await page.getByRole('button',{name:'更早记录'}).click();await page.waitForFunction(()=>document.querySelector('[data-log-message]').textContent.includes('已到最早'));assert.ok((await root.locator('textarea').inputValue()).split('\n').length<=50);
+    const geometry=await root.evaluate(node=>({client:node.clientWidth,scroll:node.scrollWidth}));assert.ok(geometry.scroll<=geometry.client+1);uiChecks.push({viewport,logGeometry:geometry});
+    if(process.env.BOXED_TEST_OUTPUT)await page.screenshot({path:path.join(process.env.BOXED_TEST_OUTPUT,`logs-${viewport.width}.png`)});
+    await page.evaluate(()=>recoveryContract.logConnection(false));assert.equal(await root.isVisible(),true);assert.match(await root.locator('[data-log-message]').textContent(),/无法读取/);
+    await page.evaluate(()=>recoveryContract.logRecreate());assert.equal(await root.isVisible(),true);
+    await page.evaluate(()=>recoveryContract.logConnection(true));assert.equal(await page.getByRole('button',{name:'清理已结束日志'}).isDisabled(),true);await root.locator('input').check();await page.getByRole('button',{name:'清理已结束日志'}).click();await page.waitForFunction(()=>document.querySelector('[data-log-message]').textContent.startsWith('已清理'));
+    assert.equal(await page.evaluate(()=>recoveryContract.logRemaining()),true);
+    await page.evaluate(()=>recoveryContract.logOpen());await page.locator('#boxed-lllllabc-log-dialog').waitFor();await page.getByRole('button',{name:'返回',exact:true}).click();await root.locator('[data-log-body]').waitFor();assert.equal(await root.locator('[data-log-body]').count(),1);
+  }
   assert.deepEqual(errors,[]);console.log(JSON.stringify({results,uiChecks,browser:browser.version(),pageErrors:errors},null,2));
 }finally{
   await browser?.close();await routes?.close();await new Promise(resolve=>server.close(resolve));

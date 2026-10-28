@@ -23,6 +23,7 @@ import { createManagedStorage, createOperationGate } from "./src/storage/managed
 import { createTransferCoordinator } from "./src/storage/transfer.js";
 import { sha256 } from "./src/storage/transfer-format.js";
 import { createStorageSwitchUi } from "./src/ui/storage-switch.js";
+import { createRuntimeLogUi } from "./src/ui/runtime-log.js";
 import { createSnapshotController } from "./src/controllers/snapshot-controller.js";
 import { createSnapshotUi } from "./src/ui/snapshots.js";
 import { ensureStatusLine, updateStatusLine } from "./src/ui/status-line.js";
@@ -38,7 +39,8 @@ const extensionName = "boxed-lllllabc";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
 
 const storageControl = createStorageControl();
-const adapters = { indexeddb: createIndexedDbStorage(), sqlite: createSqliteStorage({ getRequestHeaders }) };
+let runtimeLogUi;
+const adapters = { indexeddb: createIndexedDbStorage(), sqlite: createSqliteStorage({ getRequestHeaders,onStatus:health=>runtimeLogUi?.connection(health),onProgress:state=>switchUi?.monitor(state) }) };
 const backupStorage = createManagedStorage({ control: storageControl, adapters });
 const operationGate = createOperationGate();
 let switchUi;
@@ -357,7 +359,9 @@ jQuery(async () => {
     },
   });
 
+  runtimeLogUi=createRuntimeLogUi({storage:adapters.sqlite});
   switchUi = createStorageSwitchUi({
+    canReadLogs:()=>runtimeLogUi.available(),onLogs:()=>runtimeLogUi.open(),
     control: storageControl, sqlite: adapters.sqlite, coordinator: transferCoordinator, isGenerating,
     afterChange: async () => {
       await backupStorage.refresh();

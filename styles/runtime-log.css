@@ -1,0 +1,11 @@
+#boxed-lllllabc-runtime-logs[hidden] { display:none !important; }
+#boxed-lllllabc-runtime-logs summary { cursor:pointer; padding-block:0.5em; }
+.boxed-lllllabc-log-body { display:grid; gap:0.6em; min-width:0; }
+.boxed-lllllabc-log-body p { margin:0; overflow-wrap:anywhere; }
+.boxed-lllllabc-log-body textarea { box-sizing:border-box; width:100%; max-width:100%; resize:vertical; color:inherit; background:var(--SmartThemeBlurTintColor, #222); border:1px solid var(--SmartThemeBorderColor, #777); font:inherit; }
+.boxed-lllllabc-log-body label { display:flex; gap:0.5em; align-items:baseline; }
+.boxed-lllllabc-log-actions { display:flex; flex-wrap:wrap; gap:0.5em; }
+.boxed-lllllabc-log-body button { width:fit-content; }
+#boxed-lllllabc-log-dialog { box-sizing:border-box; width:min(46rem,calc(100vw - 2rem)); max-height:calc(100dvh - 2rem); overflow:auto; color:var(--SmartThemeBodyColor, #eee); background:var(--SmartThemeBlurTintColor, #222); border:1px solid var(--SmartThemeBorderColor, #777); border-radius:8px; padding:1rem; }
+#boxed-lllllabc-log-dialog > strong { display:block; margin-bottom:0.8em; }
+#boxed-lllllabc-log-dialog > button { margin-top:0.8em; }
