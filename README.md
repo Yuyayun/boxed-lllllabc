@@ -2,29 +2,29 @@
 
 SillyTavern 聊天保存状态与备份扩展，帮助你查看备份、找回丢失或误改的聊天内容。
 
-**当前版本：1.0.1。** 本分支已整理为正式版本号，尚未合并 main 或发布 Release。使用与本分支配套的服务器插件；[main 分支](https://github.com/Yuyayun/boxed-lllllabc/tree/main)目前仍为已发布的 1.0.0。
+**当前正式版本：1.0.1。** [正式发布与下载](https://github.com/Yuyayun/boxed-lllllabc/releases/tag/v1.0.1)。使用服务器存储时，请同时更新配套服务器插件至 1.0.1。
 
 只安装前端就能使用浏览器本地备份（IndexedDB）。[服务器插件](https://github.com/Yuyayun/boxed-lllllabc-server)是可选组件；安装后仍由你决定是否切换位置，不会自动迁移，也不会同步两个位置的数据。
 
 ## 安装与更新
 
-参与本次开发版验收，可以使用配套测试包，或下载当前分支的 ZIP。解压后，将前端目录命名为 `boxed-lllllabc`，放到酒馆的：
+在酒馆的扩展安装入口输入本仓库地址，即可安装 main 上的正式版。也可以从正式发布页面下载源码 ZIP，解压后将前端目录命名为 `boxed-lllllabc`，放到酒馆的：
 
 ```text
 public/scripts/extensions/third-party/boxed-lllllabc
 ```
 
-也可以在酒馆根目录使用 Git 安装当前测试分支：
+也可以在酒馆根目录使用 Git 安装正式版：
 
 ```sh
-git clone --branch gpt/1.0.1-migration https://github.com/Yuyayun/boxed-lllllabc.git public/scripts/extensions/third-party/boxed-lllllabc
+git clone --branch main https://github.com/Yuyayun/boxed-lllllabc.git public/scripts/extensions/third-party/boxed-lllllabc
 ```
 
 刷新页面后，在扩展设置中展开“箱装辣白菜”。前端没有额外的 npm 安装步骤，也不要求安装服务器插件。
 
 Git 安装的扩展可在其目录执行 `git pull --ff-only` 更新当前分支。使用 ZIP 更新时，先把旧代码目录移到扩展目录以外留存，再放入新目录，避免同时加载两份扩展。更新前结束生成和正在进行的存储操作，保留浏览器站点数据。
 
-使用服务器存储时，前后端都应使用本测试分支的配套版本。普通扩展安装入口输入仓库地址时获得的是 main 上的正式版，不包含本开发分支尚未发布的改进。
+使用服务器存储时，前后端应配套更新为 1.0.1。此前安装开发分支的使用者可继续保留当前分支，也可在工作目录干净时切换到 main，之后跟随正式版更新。
 
 ## 开始使用
 
@@ -107,7 +107,7 @@ Git 安装的扩展可在其目录执行 `git pull --ff-only` 更新当前分支
 
 本机已检查 SillyTavern 1.15.0、1.19.0，完成约 479 MB 级、超过 1 GiB 数据的往返、重启与旧版数据升级检查。手机 Termux、真实软键盘及 Safari 的结果不能由桌面测试代替。
 
-使用当前分支时，前后端需配套更新；浏览器旧备份升级后仍留在浏览器，不自动迁往服务器。更详细的结果见[本机验收记录](docs/acceptance/1.0.1-desktop-acceptance.md)，手机步骤见[Termux 验收清单](docs/acceptance/1.0.1-termux-checklist.md)。
+从旧版升级时，前后端需配套更新；浏览器旧备份升级后仍留在浏览器，不自动迁往服务器。更详细的结果见[本机验收记录](docs/acceptance/1.0.1-desktop-acceptance.md)，手机步骤见[Termux 验收清单](docs/acceptance/1.0.1-termux-checklist.md)。
 
 ## 开发记录与许可
 
