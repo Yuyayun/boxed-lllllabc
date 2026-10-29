@@ -8,10 +8,10 @@ import {spawn,execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import assert from 'node:assert/strict';
 
-const front=fileURLToPath(new URL('../../',import.meta.url)),run=promisify(execFile),pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const harness=fileURLToPath(new URL('../../',import.meta.url)),front=process.env.BOXED_FRONT_REPOSITORY??harness,workspace=process.env.BOXED_TEST_WORKSPACE??front,run=promisify(execFile),pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 if(!process.env.BOXED_STAGE5_ROOT)throw new Error('Set BOXED_STAGE5_ROOT to a freshly prepared disposable host tree');
 const root=await fs.realpath(process.env.BOXED_STAGE5_ROOT),prepared=JSON.parse(await fs.readFile(path.join(root,'prepared.json'),'utf8'));
-assert.equal(await fs.realpath(prepared.root),root);assert.ok(path.basename(root).startsWith('1.0.1-stage5-'));assert.equal(path.dirname(root),await fs.realpath(path.join(front,'.local-test')));
+assert.equal(await fs.realpath(prepared.root),root);assert.ok(path.basename(root).startsWith('1.0.1-stage5-'));assert.equal(path.dirname(root),await fs.realpath(path.join(workspace,'.local-test')));
 const backend=process.env.BOXED_SERVER_REPOSITORY??path.join(front,'.local-test/boxed-lllllabc-server-dev');
 const {chromium}=await import(process.env.BOXED_PLAYWRIGHT_PATH?pathToFileURL(process.env.BOXED_PLAYWRIGHT_PATH).href:'playwright');
 const cases=JSON.parse(process.env.BOXED_STAGE5_CASES??'[{"name":"479MiB","version":"1.15.0","bodyBytes":502477620},{"name":"1GiB","version":"1.15.0","bodyBytes":1073741824}]');
@@ -30,7 +30,7 @@ for(const config of cases){
   assert.match(config.name,/^[a-zA-Z0-9_-]+$/);assert.ok(['1.15.0','1.19.0'].includes(config.version));assert.ok(Number.isSafeInteger(config.bodyBytes)&&config.bodyBytes>0);
   const runtime=path.join(root,'runtime-'+config.version),caseRoot=path.join(root,'cases',config.name+'-'+Date.now()),data=path.join(caseRoot,'data'),storage=path.join(caseRoot,'boxed-storage'),profile=path.join(caseRoot,'browser-profile'),nonce=randomUUID();
   await fs.mkdir(storage,{recursive:true});await fs.mkdir(data,{recursive:true});await syncSources(runtime);
-  const publicDir=path.join(runtime,'public/boxed-stage5');await fs.mkdir(publicDir,{recursive:true});await fs.copyFile(path.join(front,'tests/browser/large-migration-contract.js'),path.join(publicDir,'large-migration-contract.js'));await fs.writeFile(path.join(publicDir,'authorization.json'),JSON.stringify({purpose:'boxed-stage5-disposable',nonce}));
+  const publicDir=path.join(runtime,'public/boxed-stage5');await fs.mkdir(publicDir,{recursive:true});await fs.copyFile(path.join(harness,'tests/browser/large-migration-contract.js'),path.join(publicDir,'large-migration-contract.js'));await fs.writeFile(path.join(publicDir,'authorization.json'),JSON.stringify({purpose:'boxed-stage5-disposable',nonce}));
   const yamlFile=path.join(caseRoot,'config.yaml'),yamlPath=p=>JSON.stringify(p.replaceAll('\\','/'));
   let yaml=await fs.readFile(prepared.configTemplate,'utf8');yaml=yaml.replace(/^dataRoot:.*$/m,'dataRoot: '+yamlPath(data)).replace(/^port:.*$/m,'port: 18101').replace(/^(\s*databaseDirectory:).*$/m,'$1 '+yamlPath(storage)).replace(/autoDownload: true/g,'autoDownload: false');await fs.writeFile(yamlFile,yaml);
   const report={name:config.name,version:config.version,startedAt:new Date().toISOString(),node:prepared.node,cpu:os.cpus()[0].model,ram:os.totalmem(),samples:[],pageErrors:[],monitorErrors:[],caseRoot};

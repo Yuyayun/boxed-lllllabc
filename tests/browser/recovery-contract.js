@@ -27,8 +27,8 @@ export function installRecoveryContract(nonce) {
   const adapters={indexeddb:createIndexedDbStorage(),sqlite:createSqliteStorage({getRequestHeaders:()=>({'X-Test-Nonce':nonce,'X-CSRF-Token':nonce}),fetchImpl:(url,options)=>{
     if(dropCommit&&url.endsWith('/batch-transfer')&&JSON.parse(options.body).action==='commit'){dropCommit=false;options={...options,headers:{...options.headers,'X-Test-Drop':'1'}};}return fetch(url,options);
   }})};
-  function makeCoordinator() {
-    return createTransferCoordinator({control,adapters,budget:{limit:2,bytes:700},pause:async()=>ui?.block(),resume:async()=>ui?.close(),progress:text=>ui?.progress(text),hook:async stage=>{
+  function makeCoordinator(ports=adapters) {
+    return createTransferCoordinator({control,adapters:ports,budget:{limit:2,bytes:700},pause:async operation=>ui?.block(undefined,operation),resume:async()=>ui?.close(),progress:text=>ui?.progress(text),hook:async stage=>{
       if(stage===pauseStage){pauseStage=null;coordinator.requestPause();}
       if(stage===stageToCrash&&!crashed){crashed=true;throw Object.assign(new Error('fixture-crash-'+stage),{simulateCrash:true});}
     }});
@@ -104,6 +104,17 @@ export function installRecoveryContract(nonce) {
     expected.source=await peek(expected.from,0);sessionStorage.setItem('boxed-recovery-expected',JSON.stringify(encodeStorageValue(expected)));
   }
   globalThis.recoveryContract={start,recover,uiCase,mutateSource,restartWorker:()=>rpc('restart-worker'),state:()=>control.read(),
+    async operationUiCase(from,kind,scenario='success'){
+      ui?.close();await reset(from);stageToCrash=null;pauseStage=null;coordinator=makeCoordinator();
+      if(kind==='clear')await coordinator.switchTo(from==='indexeddb'?'sqlite':'indexeddb',{confirmed:true});
+      document.body.innerHTML=await(await fetch('/settings.html')).text();document.querySelector('.inline-drawer-content').style.display='block';
+      globalThis.operationUiFinished=false;globalThis.operationUiText=[];
+      const observer=new MutationObserver(()=>{const node=document.querySelector('#boxed-lllllabc-transfer-dialog');if(node)globalThis.operationUiText.push(node.innerText);});observer.observe(document.body,{subtree:true,childList:true,characterData:true});
+      if(scenario==='failed'){const mode=(await control.read()).previous,original=adapters[mode].batchTransfer;let once=false;coordinator=makeCoordinator({...adapters,[mode]:{...adapters[mode],batchTransfer:async(action,args)=>{if(action==='prepareStep'&&!once){once=true;throw Object.assign(new Error('测试中的清空请求失败，结果待核对'),{code:'outcome-unknown'});}return original(action,args);}}});}
+      ui=createStorageSwitchUi({control,sqlite:adapters.sqlite,coordinator,afterChange:async()=>{globalThis.operationUiFinished=true;observer.disconnect();}});ui.bind();await ui.refresh();
+      if(scenario==='interrupted'){stageToCrash='finish-target';crashed=false;}
+      return true;
+    },
     monitorUi:state=>ui.monitor(state),
     async slowLegacyCase(){
       const expected=await reset('indexeddb'),id='legacy-slow-case';await adapters.indexeddb.transfer('source',{id});
@@ -121,6 +132,7 @@ export function installRecoveryContract(nonce) {
       for(const [stage,errorCode] of [['error','injected'],['recover'],['completed']])await adapters.sqlite.logEvent({taskId:'ui-error-done',from:'indexeddb',to:'sqlite',kind:'switch',stage,...(errorCode?{errorCode}:{})});
     },
     logConnection(online){logsUi.connection(online?{ok:true,capabilities:{logs:1}}:{ok:false});},
+    logStatus(available){logsUi.logStatus({available});},
     logRecreate(){const old=document.querySelector('#boxed-lllllabc-runtime-logs');old.replaceWith(old.cloneNode(true));logsUi=createRuntimeLogUi({storage:adapters.sqlite,remember});logsUi.connection({ok:false});},
     logOpen(){logsUi.open();},
     async logRemaining(){const result=await adapters.sqlite.readLogs({category:'all',limit:100});return result.entries.length===60&&result.entries.every(x=>x.taskId==='ui-pending-task');},

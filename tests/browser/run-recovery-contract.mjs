@@ -108,11 +108,23 @@ try{
   }
   await page.evaluate(()=>recoveryContract.uiCase('indexeddb','activated'));assert.equal(await page.getByRole('button',{name:'放弃本次迁移',exact:true}).count(),0);
   await page.getByRole('button',{name:'继续完成收尾'}).click();await page.waitForFunction(()=>globalThis.recoveryUiFinished);
+  for(const [from,kind,scenario]of [['indexeddb','switch','success'],['sqlite','switch','success'],['indexeddb','clear','success'],['sqlite','clear','success'],['indexeddb','clear','interrupted'],['sqlite','clear','failed']]){
+    await page.evaluate(({from,kind,scenario})=>recoveryContract.operationUiCase(from,kind,scenario),{from,kind,scenario});
+    await page.locator(kind==='clear'?'#boxed-lllllabc-clear-inactive':'#boxed-lllllabc-switch-storage').click();await page.locator('#boxed-lllllabc-transfer-dialog input').check();await page.getByRole('button',{name:kind==='clear'?'确认清空':'确认覆盖并切换',exact:true}).click();
+    if(scenario==='interrupted'){await page.getByRole('button',{name:'继续完成收尾',exact:true}).click();}
+    if(scenario==='failed'){await page.getByRole('button',{name:'放弃本次清空',exact:true}).click();await page.locator('#boxed-lllllabc-transfer-dialog input').check();await page.getByRole('button',{name:'确认放弃并撤销',exact:true}).click();}
+    await page.waitForFunction(()=>globalThis.operationUiFinished);
+    const messages=await page.evaluate(()=>globalThis.operationUiText),resultText=await page.locator(kind==='clear'?'#boxed-lllllabc-clear-result':'#boxed-lllllabc-transfer-result').innerText();
+    if(kind==='clear'){assert.ok(messages.every(message=>!message.includes('正在切换')&&!message.includes('原位置的备份继续保留')));assert.match(resultText,scenario==='failed'?/撤销.*保留/:/已清空/);}else assert.match(resultText,/已切换/);
+    if(scenario==='failed')assert.ok(messages.some(message=>message.includes('正在撤销清空')));
+    uiChecks.push({from,kind,scenario,resultText});
+  }
   if(!process.env.BOXED_UI_ONLY){const slow=await page.evaluate(()=>recoveryContract.slowLegacyCase());assert.ok(slow.elapsedMs>15000);assert.ok(slow.reports>3);results.push({stage:'legacy-recovery-real-route-over-15-seconds',...slow});}
   for(const viewport of [{width:1024,height:900},{width:390,height:760}]){
     await page.setViewportSize(viewport);await page.evaluate(()=>recoveryContract.logCase());
     const root=page.locator('#boxed-lllllabc-runtime-logs');assert.equal(await root.isVisible(),false);
     await page.evaluate(()=>recoveryContract.logConnection(true));assert.equal(await root.isVisible(),true);assert.equal(await root.getAttribute('open'),null);
+    await page.evaluate(()=>recoveryContract.logStatus(false));assert.equal(await page.locator('#boxed-lllllabc-log-warning').isVisible(),true);assert.match(await root.locator('summary').innerText(),/记录暂不可用/);await page.evaluate(()=>recoveryContract.logStatus(true));assert.equal(await page.locator('#boxed-lllllabc-log-warning').isVisible(),false);
     await root.locator('summary').click();await page.waitForFunction(()=>document.querySelector('[data-log-message]').textContent.startsWith('本页'));
     assert.match(await root.locator('textarea').inputValue(),/injected/);
     await root.locator('select').selectOption('all');await page.waitForFunction(()=>document.querySelector('[data-log-message]').textContent.includes('本页 50 条'));

@@ -40,7 +40,7 @@ const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
 
 const storageControl = createStorageControl();
 let runtimeLogUi;
-const adapters = { indexeddb: createIndexedDbStorage({onLegacyProgress:r=>switchUi?.progress(legacyRecoveryProgressText(r))}), sqlite: createSqliteStorage({ getRequestHeaders,onStatus:health=>runtimeLogUi?.connection(health),onProgress:state=>switchUi?.monitor(state) }) };
+const adapters = { indexeddb: createIndexedDbStorage({onLegacyProgress:r=>switchUi?.progress(legacyRecoveryProgressText(r))}), sqlite: createSqliteStorage({ getRequestHeaders,onStatus:health=>runtimeLogUi?.connection(health),onLogStatus:health=>runtimeLogUi?.logStatus(health),onProgress:state=>switchUi?.monitor(state) }) };
 const backupStorage = createManagedStorage({ control: storageControl, adapters });
 const operationGate = createOperationGate();
 let switchUi;
@@ -58,9 +58,9 @@ async function contextFingerprint() {
 }
 const transferCoordinator = createTransferCoordinator({
   control: storageControl, adapters,
-  pause: async () => {
+  pause: async (operation) => {
     if (isGenerating()) throw new Error("请先停止生成，再切换或清空存储。");
-    switchUi?.block();
+    switchUi?.block(undefined,operation);
     backendVerifier?.clearScheduledVerification();
     await backupEvents?.pause();
     backendVerifier?.clearScheduledVerification();

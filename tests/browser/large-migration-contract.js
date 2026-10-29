@@ -14,12 +14,12 @@ export async function installLargeMigrationContract({nonce,origin,chats=175,snap
   const marker=await (await fetch('/boxed-stage5/authorization.json')).json();assert(marker.nonce===nonce&&marker.purpose==='boxed-stage5-disposable','Disposable marker missing');
   const st=await import('/script.js'),ext=await import('/scripts/extensions.js');ext.extension_settings['boxed-lllllabc'].enabled=false;st.saveSettingsDebounced();
   let csrf=(await (await fetch('/csrf-token')).json()).token;
-  const transport={requests:0,maxRequestBytes:0},methods={},stages=[],snapshotsSaved=[],keys=Array.from({length:chats},(_,i)=>`character:stage5-${i}.png:chat-${i}`);
+  const transport={requests:0,maxRequestBytes:0,routes:{}},methods={},stages=[],snapshotsSaved=[],keys=Array.from({length:chats},(_,i)=>`character:stage5-${i}.png:chat-${i}`);
   const control=createStorageControl(),timings={};let golden,sourceSummary,lastStage,caseStarted=performance.now(),interruptAt=0,largeTargetOriginal,largeTargetRefs;
   const progress=(stage,count,total,message)=>{globalThis.stage5Progress={stage,count,total,message,elapsedMs:Math.round(performance.now()-caseStarted)};};
   const use=async(mode,fn)=>{const session=await adapters[mode].open();try{return await fn(session);}finally{session.close();}};
   const rawAdapters={indexeddb:createIndexedDbStorage(),sqlite:createSqliteStorage({getRequestHeaders:()=>({'X-CSRF-Token':csrf}),fetchImpl:(url,options)=>{
-    if(options.body){transport.requests++;transport.maxRequestBytes=Math.max(transport.maxRequestBytes,new TextEncoder().encode(options.body).byteLength);}return fetch(url,options);
+    if(options.body){transport.requests++;transport.maxRequestBytes=Math.max(transport.maxRequestBytes,new TextEncoder().encode(options.body).byteLength);}const route=String(url).split('/boxed-lllllabc/')[1],metric=transport.routes[route]??={calls:0,ms:0};metric.calls++;const started=performance.now();return fetch(url,options).finally(()=>{metric.ms+=performance.now()-started;});
   },onProgress:state=>{if(globalThis.stage5Progress?.stage==='restart')progress('restart',state.count,expectedCount,state.stage);}})};
   const adapters=Object.fromEntries(Object.entries(rawAdapters).map(([mode,adapter])=>[mode,{...adapter,batchTransfer:async(action,args)=>{
     const start=performance.now();const result=await adapter.batchTransfer(action,args);const ms=performance.now()-start,key=mode+':'+action,entry=methods[key]??={calls:0,totalMs:0,maxMs:0};entry.calls++;entry.totalMs+=ms;entry.maxMs=Math.max(entry.maxMs,ms);
