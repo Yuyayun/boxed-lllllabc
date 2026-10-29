@@ -97,6 +97,11 @@ try{
   for(const viewport of [{width:1024,height:900},{width:390,height:760}]){
     await page.setViewportSize(viewport);await page.evaluate(()=>recoveryContract.uiCase());
     const dialog=page.locator('#boxed-lllllabc-transfer-dialog');await dialog.waitFor();
+    const primary=await dialog.locator('p').innerText(),monitor=dialog.locator('small').last();
+    await page.evaluate(()=>recoveryContract.monitorUi({state:'working',count:7,elapsedMs:1000}));assert.equal(await monitor.isVisible(),true);
+    await page.evaluate(()=>recoveryContract.monitorUi({state:'idle',stage:'legacy-copy',count:999,elapsedMs:3600000}));assert.equal(await monitor.isVisible(),false);assert.equal(await monitor.textContent(),'');assert.equal(await dialog.locator('p').innerText(),primary);
+    await page.evaluate(()=>recoveryContract.monitorUi({state:'queued',elapsedMs:2000}));assert.equal(await monitor.isVisible(),true);assert.match(await monitor.innerText(),/排队/);
+    await page.evaluate(()=>recoveryContract.monitorUi({state:'no-progress',elapsedMs:20000}));assert.match(await monitor.innerText(),/没有有效进展/);
     await page.evaluate(()=>recoveryContract.monitorUi({state:'initializing',stage:'upgrade-copy-verified',count:100000,elapsedMs:123000}));
     const geometry=await dialog.evaluate(node=>({width:node.getBoundingClientRect().width,client:node.clientWidth,scroll:node.scrollWidth,text:node.textContent,buttons:[...node.querySelectorAll('button')].map(b=>({text:b.textContent,disabled:b.disabled}))}));
     assert.ok(geometry.scroll<=geometry.client+1);assert.match(geometry.text,/继续核对并恢复/);uiChecks.push({viewport,geometry});

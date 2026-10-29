@@ -15,7 +15,7 @@ test("发布元数据指向真实 GitHub 仓库", async () => {
   const changelog = await readProjectFile("CHANGELOG.md");
 
   assert.equal(manifest.homePage, REPOSITORY_URL);
-  assert.equal(manifest.version, "1.0.1-dev.1");
+  assert.equal(manifest.version, "1.0.1");
   assert.equal(packageJson.version, manifest.version);
   assert.equal(packageJson.homepage, REPOSITORY_URL);
   assert.equal(packageJson.repository.url, `git+${REPOSITORY_URL}.git`);

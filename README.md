@@ -2,7 +2,7 @@
 
 SillyTavern 聊天保存状态与备份扩展，帮助你查看备份、找回丢失或误改的聊天内容。
 
-**本分支为 1.0.1-dev.1 开发验收版，尚未正式发布。** 本机测试已完成，Termux 实机验收待使用者完成。正式版仍在 [main 分支](https://github.com/Yuyayun/boxed-lllllabc/tree/main)。
+**当前版本：1.0.1。** 本分支已整理为正式版本号，尚未合并 main 或发布 Release。使用与本分支配套的服务器插件；[main 分支](https://github.com/Yuyayun/boxed-lllllabc/tree/main)目前仍为已发布的 1.0.0。
 
 只安装前端就能使用浏览器本地备份（IndexedDB）。[服务器插件](https://github.com/Yuyayun/boxed-lllllabc-server)是可选组件；安装后仍由你决定是否切换位置，不会自动迁移，也不会同步两个位置的数据。
 

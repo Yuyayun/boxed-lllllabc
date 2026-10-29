@@ -11,7 +11,7 @@ test('搬家、清空、暂停及日常失败按真实对象说明，诊断字�
   assert.match(formatRuntimeLog({taskId:'diagnostic-id',stage:'internal-stage'},{diagnostic:true}),/诊断：.*diagnostic-id/);
 });
 test('空闲不沿用旧阶段、数量或线程运行时间；排队与执行时间分别说明',()=>{
-  const idle=supervisorProgressText({state:'idle',stage:'legacy-copy',count:100,elapsedMs:86400000});assert.equal(idle,'服务器当前空闲。');
+  const idle=supervisorProgressText({state:'idle',stage:'legacy-copy',count:100,elapsedMs:86400000});assert.equal(idle,'');
   assert.match(supervisorProgressText({state:'queued',elapsedMs:2000}),/排队，已等待 2 秒/);
   assert.match(supervisorProgressText({state:'working',elapsedMs:3000}),/当前任务已用 3 秒/);
 });

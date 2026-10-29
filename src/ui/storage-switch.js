@@ -12,10 +12,10 @@ export function legacyRecoveryProgressText(r){
   return `正在分批恢复旧任务：${legacyStageNames[r?.stage]??'核对任务'}${Number.isSafeInteger(count)?'（本阶段 '+count+' 条）':''}`;
 }
 export function supervisorProgressText(state){
-  if(state.state==='idle')return '服务器当前空闲。';
+  if(state.state==='idle')return '';
   if(state.state==='queued')return `任务正在排队，已等待 ${Math.floor((state.elapsedMs??0)/1000)} 秒。`;
   const stages={'startup-audit':'逐页检查已有记录','upgrade-backup':'生成旧库一致备份','upgrade-backup-recheck':'复核旧库备份','upgrade-source-recheck':'复核升级来源','upgrade-copy-verified':'写入并核对新结构','upgrade-target-check':'验收新结构','upgrade-activated':'已启用新结构','upgrade-cleanup':'分批清理旧表','storage-statistics':'分批统计容量','legacy-inventory':'清点旧任务回滚副本','legacy-clear':'整理旧任务恢复位置','legacy-copy':'分批写回并读回核对','legacy-verify':'验收旧任务恢复内容','legacy-cleanup':'清理旧任务暂存'};
-  const labels={initializing:'服务器正在准备存储',slow:'当前步骤较慢，仍在等待有效进展',working:'服务器正在处理',idle:'服务器已完成当前步骤','no-progress':'长时间没有有效进展，结果需要核对',unresponsive:'服务器工作线程暂未回复，结果需要核对',unavailable:'服务器工作线程不可用'};
+  const labels={initializing:'服务器正在准备存储',slow:'当前步骤较慢，仍在等待有效进展',working:'服务器正在处理','no-progress':'长时间没有有效进展，结果需要核对',unresponsive:'服务器工作线程暂未回复，结果需要核对',unavailable:'服务器工作线程不可用'};
   const legacyName=state.stage?.startsWith('legacy-')?legacyStageNames[state.stage.slice(7)]:undefined;
   const status=['no-progress','unresponsive','unavailable'].includes(state.state)?labels[state.state]:legacyName??stages[state.stage]??labels[state.state];
   return `${status??'正在等待服务器'}${Number.isSafeInteger(state.count)?'；本阶段已处理 '+state.count+' 条':''}${Number.isSafeInteger(state.verified)?'；已读回核对 '+state.verified+' 条':''}；${state.state==='initializing'?'准备存储已用':'当前任务已用'} ${Math.floor((state.elapsedMs??0)/1000)} 秒。存活报告不表示核验完成。`;
@@ -59,7 +59,7 @@ export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerati
     });
     node.addEventListener('keyup',(event)=>event.stopPropagation());
     const boundary=document.createElement('small'); boundary.textContent='当前页面已锁定。其他插件或外部程序直接修改聊天无法完全拦截；检测到当前聊天变化会停止提交。'; node.append(boundary);
-    monitorText=document.createElement('small');node.append(monitorText);
+    monitorText=document.createElement('small');monitorText.hidden=true;node.append(monitorText);
     if(canReadLogs())button('查看运行日志',onLogs);
     if (running && coordinator.requestPause && coordinator.canPause?.()!==false) {
       const pauseButton=button('暂停任务',()=>{
@@ -158,5 +158,5 @@ export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerati
     document.querySelector('#boxed-lllllabc-clear-inactive')?.addEventListener('click',()=>confirm('clear').catch(failure));
     document.querySelector('#boxed-lllllabc-check-storage')?.addEventListener('click',()=>{ resultSelector='#boxed-lllllabc-transfer-result'; refresh().then(afterChange).catch(failure); });
   }
-  return { bind, refresh, block, close, failure,monitor(state){const message=supervisorProgressText(state);if(monitorText?.isConnected)monitorText.textContent=message;else if(state.state==='initializing')text('#boxed-lllllabc-sqlite-state',message);},progress(message) { if (progressText) progressText.textContent=pausing?`${message}\n已请求暂停，将在当前步骤结束后停下。`:message; } };
+  return { bind, refresh, block, close, failure,monitor(state){const message=supervisorProgressText(state);if(monitorText?.isConnected){monitorText.textContent=message;monitorText.hidden=!message;}else if(state.state==='initializing')text('#boxed-lllllabc-sqlite-state',message);},progress(message) { if (progressText) progressText.textContent=pausing?`${message}\n已请求暂停，将在当前步骤结束后停下。`:message; } };
 }
