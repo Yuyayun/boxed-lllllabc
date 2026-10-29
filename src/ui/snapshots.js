@@ -29,7 +29,7 @@ export function createSnapshotUi({ controller, onChanged = async () => {} }) {
     if (!status && body) { status = element("p"); status.dataset.snapshotStatus = ""; status.setAttribute("role", "status"); body.append(status); }
     if (status) status.textContent = text;
   }
-  async function perform(callback) {
+  async function perform(callback, isSuccess, failureReason) {
     if (busy) return;
     busy = true;
     const controls = [...dialog.querySelectorAll("button,input")];
@@ -37,19 +37,22 @@ export function createSnapshotUi({ controller, onChanged = async () => {} }) {
     const disabled = controls.map(node => node.disabled); controls.forEach(node => { node.disabled = true; });
     dialog.setAttribute("aria-busy", "true"); message("正在处理，请勿关闭页面。聊天快照不会自动改写已有存档。");
     const progress = dialog.querySelector("[data-snapshot-status]"); progress.tabIndex = 0; progress.focus();
-    try { return await callback(); }
+    let succeeded = false;
+    try {
+      const result = await callback();
+      await onChanged();
+      succeeded = isSuccess(result);
+      if (!succeeded) message(result?.reason || failureReason);
+    }
     finally { busy = false; controls.forEach((node, index) => { node.disabled = disabled[index]; }); dialog?.removeAttribute("aria-busy"); progress.tabIndex = -1; if (previousFocus?.isConnected) previousFocus.focus(); }
+    if (succeeded) close();
   }
   function create() {
     frame("创建聊天快照");
     body.append(element("p", "保存当前聊天的完整内容、所有候选回复及聊天元数据。不会新建酒馆聊天，也不会开启自动快照。"));
     const label = element("label", "快照名称"), input = element("input"); input.type = "text"; input.maxLength = 200; input.value = new Date().toLocaleString(); label.append(input); body.append(label);
     button("取消", close);
-    button("确认创建", () => perform(async () => {
-      const result = await controller.create({ name: input.value.trim() || undefined });
-      message(`聊天快照「${result.header.name}」已保存并完成校验，共 ${result.header.messageCount} 层。`);
-      await onChanged();
-    }));
+    button("确认创建", () => perform(() => controller.create({ name: input.value.trim() || undefined }), result => result?.ok === true, "聊天快照尚未确认保存并完成校验，请检查后重试。"));
     input.focus(); input.select();
   }
   async function manage() {
@@ -104,18 +107,16 @@ export function createSnapshotUi({ controller, onChanged = async () => {} }) {
     body.append(element("p", `来源快照：${result.snapshot.header.name}`), element("p", `当前聊天：${chatName(result.meta)}。将覆盖当前聊天的完整内容和可恢复元数据，共 ${result.snapshot.chat.length} 层；当前未保存改动将被替换，原生聊天身份保持不变。源快照仍然保留。`));
     const label = element("label"), check = element("input"); check.type = "checkbox"; label.append(check, element("span", "我确认覆盖当前聊天内容。")); body.append(label);
     button("取消", () => preview(result.snapshot.header.id));
-    const submit = button("确认覆盖并恢复", () => perform(async () => {
-      const restored = await controller.restore(result.restore, { confirmed: true }); message(restored.reason || "本次恢复未完成。"); await onChanged();
-    })); submit.disabled = true; check.addEventListener("change", () => { submit.disabled = !check.checked; });
+    const submit = button("确认覆盖并恢复", () => perform(() => controller.restore(result.restore, { confirmed: true }), restored => restored?.ok === true && restored.confirmed === true, "本次恢复未完成或酒馆保存尚未确认。")); submit.disabled = true; check.addEventListener("change", () => { submit.disabled = !check.checked; });
   }
   function rename(item) {
     frame("重命名聊天快照"); body.append(element("p", "只修改名称，存档正文、创建时间与内容摘要保持不变。"));
     const label = element("label", "快照名称"), input = element("input"); input.type = "text"; input.maxLength = 200; input.value = item.name; label.append(input); body.append(label);
-    button("取消", manage); button("保存名称", () => perform(async () => { await controller.rename({ id: item.id, name: input.value, expectedName: item.name }); message("快照名称已保存。"); })); input.focus(); input.select();
+    button("取消", manage); button("保存名称", () => perform(() => controller.rename({ id: item.id, name: input.value, expectedName: item.name }), result => result?.id === item.id && result.name === input.value.trim(), "快照名称尚未确认保存，请刷新后检查。")); input.focus(); input.select();
   }
   function remove(item) {
     frame("删除聊天快照"); body.append(element("p", `将永久删除快照「${item.name}」（${item.messageCount} 层）。此操作不清理普通备份，也不修改酒馆聊天。`));
-    button("取消", manage); button("确认删除此快照", () => perform(async () => { await controller.delete({ id: item.id, expectedHash: item.contentHash, confirmed: true }); message("此聊天快照已删除。"); await onChanged(); }));
+    button("取消", manage); button("确认删除此快照", () => perform(() => controller.delete({ id: item.id, expectedHash: item.contentHash, confirmed: true }), result => result?.deleted === true, "本次未确认删除快照，请刷新后检查。"));
   }
   function bind() { document.querySelector("#boxed-lllllabc-manage-snapshots")?.addEventListener("click", () => manage().catch(error => message(error.message))); }
   return { bind, create, manage, preview };

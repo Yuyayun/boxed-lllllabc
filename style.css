@@ -486,6 +486,15 @@
   overflow: auto;
 }
 
+#boxed-lllllabc-status-dialog-body {
+  align-content: start;
+  grid-auto-rows: max-content;
+}
+
+#boxed-lllllabc-status-dialog-body .boxed-lllllabc-primary-actions {
+  align-content: start;
+}
+
 .boxed-lllllabc-update-dialog {
   z-index: 10002;
 }
@@ -1778,6 +1787,10 @@
     align-items: flex-start;
     flex-direction: column;
     gap: 3px;
+  }
+
+  #boxed-lllllabc-status-dialog-body .boxed-lllllabc-primary-actions-title > span {
+    flex: none;
   }
 
   .boxed-lllllabc-primary-action-grid {
