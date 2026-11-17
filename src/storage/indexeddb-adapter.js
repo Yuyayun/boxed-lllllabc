@@ -3,6 +3,7 @@ import { createIndexedDbTransfer } from "./indexeddb-transfer.js";
 import { createIndexedDbBatchTransfer } from "./indexeddb-batch-transfer.js";
 import { BATCH_TRANSFER_VERSION, validateBatchCall } from "./protocol.js";
 import {migrationSpaceBudget} from './capacity-budget.js';
+import { createIndexedDbBackupBatches } from './indexeddb-backup-batches.js';
 
 // Keep compound operations in src/db/index.js: their validation and writes must
 // continue to run in the same IndexedDB transaction.
@@ -46,6 +47,7 @@ const OPERATIONS = Object.freeze({
  */
 export function createIndexedDbStorage({ openDatabase = database.openBackupDatabase,onLegacyProgress=()=>{} } = {}) {
   const batches = createIndexedDbBatchTransfer({ openDatabase });
+  const backupBatches = createIndexedDbBackupBatches({ openDatabase });
   return Object.freeze({
     mode: "indexeddb",
     batchVersion: BATCH_TRANSFER_VERSION,
@@ -59,7 +61,7 @@ export function createIndexedDbStorage({ openDatabase = database.openBackupDatab
     transfer: createIndexedDbTransfer({ openDatabase,onLegacyProgress }),
     async open() {
       const db = await openDatabase();
-      const session = { close: () => db.close() };
+      const session = { close: () => db.close(), capabilities: { boundedBackup: 1 }, ...backupBatches };
       for (const [name, operation] of Object.entries(OPERATIONS)) {
         session[name] = (...args) => operation(db, ...args);
       }

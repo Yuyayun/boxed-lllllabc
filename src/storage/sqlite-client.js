@@ -80,7 +80,7 @@ export function createSqliteStorage({ fetchImpl = globalThis.fetch, getRequestHe
       const health = await status();
       if (!health.ok) throw Object.assign(new Error(health.reason), { code: health.code });
       let closed = false;
-      const session = { close() { closed = true; } };
+      const session = { capabilities: health.capabilities ?? {}, close() { closed = true; } };
       for (const operation of STORAGE_OPERATIONS) {
         session[operation] = async (...args) => {
           if (closed) throw new Error("存储会话已经关闭。");
