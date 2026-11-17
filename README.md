@@ -2,7 +2,7 @@
 
 SillyTavern 聊天保存状态与备份扩展，帮助你查看备份、找回丢失或误改的聊天内容。
 
-**当前正式版本：1.0.1。** [正式发布与下载](https://github.com/Yuyayun/boxed-lllllabc/releases/tag/v1.0.1)。使用服务器存储时，请同时更新配套服务器插件至 1.0.1。
+**当前分支版本：1.0.2，尚未发布。** 最近正式版为 1.0.1，[正式版下载](https://github.com/Yuyayun/boxed-lllllabc/releases/tag/v1.0.1)。本分支修复超大聊天备份链路。
 
 只安装前端就能使用浏览器本地备份（IndexedDB）。[服务器插件](https://github.com/Yuyayun/boxed-lllllabc-server)是可选组件；安装后仍由你决定是否切换位置，不会自动迁移，也不会同步两个位置的数据。
 
@@ -24,7 +24,7 @@ git clone --branch main https://github.com/Yuyayun/boxed-lllllabc.git public/scr
 
 Git 安装的扩展可在其目录执行 `git pull --ff-only` 更新当前分支。使用 ZIP 更新时，先把旧代码目录移到扩展目录以外留存，再放入新目录，避免同时加载两份扩展。更新前结束生成和正在进行的存储操作，保留浏览器站点数据。
 
-使用服务器存储时，前后端应配套更新为 1.0.1。此前安装开发分支的使用者可继续保留当前分支，也可在工作目录干净时切换到 main，之后跟随正式版更新。
+使用服务器存储处理超大聊天时，请将配套服务器插件更新至 1.0.2。前后端可以分别更新；旧后端仍尽量支持普通小操作，需要分批能力时会明确提示更新。
 
 ## 开始使用
 
@@ -107,10 +107,10 @@ Git 安装的扩展可在其目录执行 `git pull --ff-only` 更新当前分支
 
 本机已检查 SillyTavern 1.15.0、1.19.0，完成约 479 MB 级、超过 1 GiB 数据的往返、重启与旧版数据升级检查。手机 Termux、真实软键盘及 Safari 的结果不能由桌面测试代替。
 
-从旧版升级时，前后端需配套更新；浏览器旧备份升级后仍留在浏览器，不自动迁往服务器。更详细的结果见[本机验收记录](docs/acceptance/1.0.1-desktop-acceptance.md)，手机步骤见[Termux 验收清单](docs/acceptance/1.0.1-termux-checklist.md)。
+浏览器旧备份升级后仍留在浏览器，不自动迁往服务器。本次结果见[1.0.2 超大聊天修复验收](docs/acceptance/2026-11-17-large-chat-backups.md)；此前结果见[1.0.1 本机验收记录](docs/acceptance/1.0.1-desktop-acceptance.md)，手机步骤见[Termux 验收清单](docs/acceptance/1.0.1-termux-checklist.md)。
 
 ## 开发记录与许可
 
-[更新日志](CHANGELOG.md) 面向使用者；[本轮整改与实测对照](docs/acceptance/1.0.1-remediation-report.md) 说明最新调整，[docs/acceptance](docs/acceptance/README.md) 保留开发阶段和测试记录。
+[更新日志](CHANGELOG.md) 面向使用者；[本次修复与验收](docs/acceptance/2026-11-17-large-chat-backups.md) 说明最新调整，[docs/acceptance](docs/acceptance/README.md) 保留开发阶段和测试记录。
 
 作者：**辣白菜 / labaicai0969**。采用 [LICENSE](LICENSE) 中的 AFPL 9；本扩展可免费使用，禁止任何形式的商业用途。

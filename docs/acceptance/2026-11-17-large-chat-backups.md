@@ -2,6 +2,8 @@
 
 日期：2026-11-17。范围以本次代码审计为准，修复在前后端同名分支 `codex/large-chat-backups`。
 
+本轮版本为 **1.0.2**。前端 manifest、package、设置显示与后端 package、status 版本已统一；内置更新日志读取 CHANGELOG.md 的 1.0.2 条目。当前仅本地提交，未推送、创建标签或发布 Release。
+
 ## 基线与保持项
 
 - 开工前已 fetch 两仓库的远端 main。前端基线 `aea0132de9ca5be4ea82176ccd231e35d25f92a6`，后端基线 `5d8fff54cfcb5ea6dca522ff994431777b9860d2`，均对应 v1.0.1。
