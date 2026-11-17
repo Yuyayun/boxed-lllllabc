@@ -220,17 +220,30 @@ export function createPanelController({
               : null,
           },
           onVerify: async () => {
-            if (pending.length) {
-              await verifyBackendNow({
-                chatKey: current.identity.chatKey,
-                retryIndex: verificationRetryLimit,
-              });
-            } else {
-              await verifyBackendSnapshotNow({
-                chatKey: current.identity.chatKey,
-                expectedChatHash: hashCanonicalChat(current.chat),
-                retryIndex: verificationRetryLimit,
-              });
+            try {
+              let pendingCount = pending.length;
+              if (summary) {
+                const fresh = await storage.open();
+                try {
+                  pendingCount = (await fresh.getBackupSummary(current.identity.chatKey)).counts.pending_changes;
+                } finally {
+                  fresh.close();
+                }
+              }
+              if (pendingCount > 0) {
+                await verifyBackendNow({
+                  chatKey: current.identity.chatKey,
+                  retryIndex: verificationRetryLimit,
+                });
+              } else {
+                await verifyBackendSnapshotNow({
+                  chatKey: current.identity.chatKey,
+                  expectedChatHash: hashCanonicalChat(current.chat),
+                  retryIndex: verificationRetryLimit,
+                });
+              }
+            } catch (error) {
+              setStatus(backupFailureStatus(error, '读取'));
             }
             await refreshVisiblePanel();
           },

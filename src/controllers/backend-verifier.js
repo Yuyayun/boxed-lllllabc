@@ -224,7 +224,7 @@ export function createBackendVerifier({
           if (!confirmation.applied || !isCurrentRun(runId)) {
             return latestStatus();
           }
-          if (confirmation.value?.code === "db-error") {
+          if (confirmation.value?.code) {
             return publishStatus(runId, { status: confirmation.value, refresh: true });
           }
         }
@@ -321,7 +321,7 @@ export function createBackendVerifier({
         if (!confirmation.applied || !isCurrentRun(runId)) {
           return latestStatus();
         }
-        if (confirmation.value?.code === "db-error") {
+        if (confirmation.value?.code) {
           return publishStatus(runId, { status: confirmation.value, refresh: true });
         }
         const requestedStatus = createDisplayStatus("saved", "酒馆聊天已保存");

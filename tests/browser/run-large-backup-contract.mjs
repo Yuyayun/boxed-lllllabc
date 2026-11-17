@@ -19,6 +19,8 @@ try {
   for (const mobile of [false, true]) {
     const context = await browser.newContext({ viewport: { width: mobile ? 360 : 1200, height: 760 }, isMobile: mobile, hasTouch: mobile });
     const page = await context.newPage(); await page.goto(`http://127.0.0.1:${server.address().port}`);
+    const panelVerificationCases = await page.evaluate(async () => (await import('/tests/browser/panel-verification-contract.js')).runPanelVerificationContract());
+    assert.equal(panelVerificationCases.length, 7);
     const result = await page.evaluate(async () => {
       const { createIndexedDbStorage } = await import('/src/storage/indexeddb-adapter.js');
       const { readBackupRecords, writeBackupRecords } = await import('/src/storage/backup-batches.js');
@@ -87,6 +89,6 @@ try {
     assert([3000, 10000].includes(reopenedCount), 'closing the page published a partial IDB transaction');
     const snapshotUiCases = await reopened.evaluate(async () => (await import('/tests/browser/snapshot-ui-contract.js')).runSnapshotUiContract());
     assert.equal(snapshotUiCases.length, 12);
-    console.log(JSON.stringify({ mobile, ...result, interruptedCommitCount: reopenedCount, atomicClose: true, snapshotUiCases: snapshotUiCases.length })); await context.close();
+    console.log(JSON.stringify({ mobile, ...result, interruptedCommitCount: reopenedCount, atomicClose: true, snapshotUiCases: snapshotUiCases.length, panelVerificationCases: panelVerificationCases.length })); await context.close();
   }
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }
