@@ -10,6 +10,10 @@ import { defaultBackupStorage } from "../storage/service.js";
 import { renderCurrentChatPanel } from "../ui/current-chat-panel.js";
 import { openFrozenBackupDialog } from "../ui/frozen-backup-dialog.js";
 import { createCurrentChatStorageText } from "../ui/storage-status.js";
+import { readBackupRecords, writeBackupRecords } from '../storage/backup-batches.js';
+import { storedChatSummary } from '../storage/backup-catalog-summary.js';
+import { buildResolvedFullBackupMeta } from '../backup/frozen-resolution.js';
+import { backupFailureStatus } from '../backup/failure-status.js';
 import {
   closeStatusDialog,
   openStatusDialog,
@@ -145,7 +149,8 @@ export function createPanelController({
     try {
       const session = await storage.open();
       try {
-        const [messages, pending, fullMessages, historicalChanges, meta] = await Promise.all([
+        const summary = session.capabilities?.boundedBackup ? await session.getBackupSummary(current.identity.chatKey) : null;
+        const [messages, pending, fullMessages, historicalChanges, meta] = summary ? [await readBackupRecords(session, current.identity.chatKey, 'recent_messages', { summary }), [], [], [], summary.meta] : await Promise.all([
           session.getRecentMessages(current.identity.chatKey),
           session.getPendingChanges(current.identity.chatKey),
           session.getFullMessages(current.identity.chatKey),
@@ -161,11 +166,13 @@ export function createPanelController({
           historicalChanges,
           pending,
           meta: panelMeta,
+          summary,
         });
-        const cleanupChat = buildCurrentCleanupChat({
+        const cleanupChat = summary ? storedChatSummary(current.identity.chatKey, panelMeta, Object.fromEntries(Object.entries(summary.counts).map(([store, count]) => [store, { count, bytes: 0, firstIndex: store === 'full_messages' && count ? 0 : null, lastIndex: store === 'full_messages' && count ? count - 1 : null }])), summary.revision) : buildCurrentCleanupChat({
           meta: panelMeta,
           messages,
           pending,
+          summary,
           fullMessages,
           historicalChanges,
         });
@@ -176,6 +183,7 @@ export function createPanelController({
         });
         renderCurrentChatPanel(panelBody, {
           onCreateSnapshot,
+          summary,
           status: getLatestStatus(),
           meta: panelMeta,
           messages,
@@ -184,7 +192,13 @@ export function createPanelController({
           pending,
           settings,
           restore,
-          frozenResolution: frozenResolution.ok
+          frozenResolution: summary && panelMeta.fullBackupState === 'frozen' ? { plan: true, onOpen: async () => {
+            const fresh = await storage.open();
+            try { const state = await fresh.getBackupSummary(current.identity.chatKey); const full = await readBackupRecords(fresh, current.identity.chatKey, 'full_messages', { summary: state });
+              const resolution = createFrozenFullBackupResolutionPlan({ current: contextReader.readCurrentChat(), meta: state.meta, fullMessages: full });
+              if (resolution.ok) openFrozenDialog({ plan: resolution.plan, fullBackupEnabled: Boolean(settings.enabled && settings.fullBackupEnabled), onConfirm: (action, plan) => executeFrozenResolution(plan, action) });
+            } catch (error) { globalThis.toastr?.error?.(error.message, '箱装辣白菜'); } finally { fresh.close(); }
+          } } : frozenResolution.ok
             ? {
               plan: frozenResolution.plan,
               onOpen: () => openFrozenDialog({
@@ -196,7 +210,7 @@ export function createPanelController({
             : {},
           management: {
             disabledReason: cleanupChat ? "" : "当前聊天还没有可管理的备份。",
-            storageText: createCurrentChatStorageText(
+            storageText: summary ? '' : createCurrentChatStorageText(
               getStorageSnapshot(),
               cleanupChat?.storageBytes ?? 0,
             ),
@@ -225,7 +239,7 @@ export function createPanelController({
       }
     } catch (error) {
       renderCurrentChatPanel(panelBody, {
-        status: createBackupStatus("db-error", "备份不可用", error),
+        status: backupFailureStatus(error, '读取'),
         meta: current.identity.meta,
         messages: [],
         pending: [],
@@ -261,7 +275,8 @@ export function createPanelController({
     let session;
     try {
       session = await storage.open();
-      const [meta, fullMessages] = await Promise.all([
+      const state = session.capabilities?.boundedBackup ? await session.getBackupSummary(plan?.chatKey) : null;
+      const [meta, fullMessages] = state ? [state.meta, await readBackupRecords(session, plan?.chatKey, 'full_messages', { summary: state })] : await Promise.all([
         session.getChatMeta(plan?.chatKey),
         session.getFullMessages(plan?.chatKey),
       ]);
@@ -280,7 +295,9 @@ export function createPanelController({
       const messages = action === FROZEN_FULL_BACKUP_ACTIONS.adoptCurrent
         ? current.chat.map((message, index) => canonicalizeMessage(message, index, now))
         : [];
-      const result = await session.resolveFrozenFullBackup({
+      const result = state ? await writeBackupRecords(session, { chatKey: plan.chatKey, store: 'full_messages', rows: messages, replace: true, summary: state, meta: buildResolvedFullBackupMeta({ action, currentMeta: meta, identityMeta: current.identity.meta, messages, now }), sourceUnchanged: () => {
+        const live = contextReader.readCurrentChat(); return live.ok && live.identity.chatKey === plan.chatKey && hashCanonicalChat(live.chat) === plan.expectedCurrentChatHash;
+      } }) : await session.resolveFrozenFullBackup({
         chatKey: plan.chatKey,
         action,
         expectedFullFingerprint: plan.expectedFullFingerprint,

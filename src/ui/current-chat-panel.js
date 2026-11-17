@@ -19,6 +19,7 @@ export function renderCurrentChatPanel(container, {
   management = {},
   onVerify,
   onCreateSnapshot,
+  summary: backupSummary = null,
 }) {
   const recentExpanded = container.dataset.recentExpanded === "true";
   container.replaceChildren();
@@ -42,17 +43,19 @@ export function renderCurrentChatPanel(container, {
       container.dataset.recentExpanded = String(expanded);
     },
   }, restore));
-  container.append(renderFullSection(fullMessages, meta, settings, restore, frozenResolution));
+  container.append(renderFullSection(fullMessages, meta, settings, restore, frozenResolution, backupSummary?.counts.full_messages));
   const historicalSection = renderHistoricalSection(historicalChanges, restore);
   if (historicalSection) {
     container.append(historicalSection);
   }
-  container.append(renderPendingSection(pending, restore));
+  if (backupSummary?.counts.historical_changes) container.append(renderLine('历史楼层改动备份', `${backupSummary.counts.historical_changes} 条，进入恢复备份查看`));
+  if (backupSummary?.counts.pending_changes) container.append(renderLine('未保存变更', `${backupSummary.counts.pending_changes} 条，进入恢复备份查看`));
+  else container.append(renderPendingSection(pending, restore));
   container.append(renderBackupManagement(management));
 
 }
 
-function renderFullSection(messages, meta = {}, settings = {}, restore = {}, frozenResolution = {}) {
+function renderFullSection(messages, meta = {}, settings = {}, restore = {}, frozenResolution = {}, summaryCount) {
   const section = document.createElement("section");
   section.className = "boxed-lllllabc-panel-section";
   const title = document.createElement("div");
@@ -60,7 +63,7 @@ function renderFullSection(messages, meta = {}, settings = {}, restore = {}, fro
   title.textContent = "完整聊天备份";
   section.append(title);
 
-  if (!messages.length) {
+  if (!(summaryCount ?? messages.length)) {
     section.append(renderEmpty(settings.fullBackupEnabled ? "还没有完整聊天备份" : "完整聊天备份未启用"));
     return section;
   }
@@ -74,10 +77,10 @@ function renderFullSection(messages, meta = {}, settings = {}, restore = {}, fro
   heading.textContent = meta.chatDisplayName || meta.chatFile || meta.chatId || "当前聊天";
   const detail = document.createElement("span");
   detail.className = "boxed-lllllabc-recent-file-meta";
-  detail.textContent = formatFullBackupDetail(messages, meta, settings);
+  detail.textContent = summaryCount !== undefined ? `${summaryCount} 层 · ${meta.fullBackupState === 'frozen' ? '已暂停更新，原备份保留' : meta.fullBackupState === 'awaiting-confirmation' ? '等待酒馆保存确认' : '更新于 ' + formatDate(meta.fullBackupAt)}` : formatFullBackupDetail(messages, meta, settings);
   const preview = document.createElement("span");
   preview.className = "boxed-lllllabc-recent-file-preview";
-  preview.textContent = getMessagePreview(messages.at(-1));
+  preview.textContent = summaryCount !== undefined ? '预览恢复时读取完整内容' : getMessagePreview(messages.at(-1));
   main.append(heading, detail, preview);
   file.append(main);
   const actions = document.createElement("div");

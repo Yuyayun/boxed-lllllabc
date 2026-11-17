@@ -1,6 +1,6 @@
 import { createFullRestorePlan } from "../backup/restore.js";
 import { canonicalizeMessage, stripChatHeader } from "../backup/canonicalize.js";
-import { currentSnapshotFingerprint } from "./model.js";
+import { currentSnapshotFingerprint, sameSnapshotContent } from "./model.js";
 import { stableText } from "../storage/value-digest.js";
 
 export function restoredMetadata(snapshot, current) {
@@ -27,7 +27,7 @@ const persisted = value => JSON.parse(JSON.stringify(value));
 export function verifyNativeSnapshotSave({ snapshot, metadata, backend }) {
   if (!backend?.ok || !Array.isArray(backend.chat)) return false;
   const header = backend.chat[0];
-  return stableText(persisted(stripChatHeader(backend.chat))) === stableText(persisted(snapshot.chat))
+  return sameSnapshotContent(stripChatHeader(backend.chat).map(persisted), snapshot.chat.map(persisted))
     && header?.chat_metadata && stableText(persisted(header.chat_metadata)) === stableText(persisted(metadata));
 }
 export function validateNativeSnapshotPayload(snapshot, metadata) {

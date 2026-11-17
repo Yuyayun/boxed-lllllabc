@@ -1,4 +1,4 @@
-import { captureSnapshot, currentSnapshotFingerprint } from "../snapshots/model.js";
+import { captureSnapshot, currentSnapshotFingerprint, sameSnapshotContent } from "../snapshots/model.js";
 import { readSnapshot, snapshotBatches } from "../snapshots/service.js";
 import { previewSnapshotRestore, restoredMetadata, verifyNativeSnapshotSave, validateNativeSnapshotPayload } from "../snapshots/restore.js";
 import { executeRestorePlan } from "../backup/restore-executor.js";
@@ -7,6 +7,7 @@ import { waitForSaveRequest } from "../backup/save-request.js";
 import { readBackendChat } from "../verifier/backend-reader.js";
 import { stableText } from "../storage/value-digest.js";
 import { createSnapshotSaveProof } from "../snapshots/confirmation.js";
+import { readBackupRecords, writeBackupRecords } from '../storage/backup-batches.js';
 
 export function createSnapshotController({ storage, getContextReader, runGuard = operation => operation(),
   isGenerating = () => false, beforeRestore = async () => {}, afterRestore = async () => {},
@@ -46,7 +47,7 @@ export function createSnapshotController({ storage, getContextReader, runGuard =
     list: options => sessionUse(session => session.listSnapshots({ ...options, includeDrafts: true })),
     preview: id => sessionUse(async session => {
       const snapshot = await readSnapshot(session, id), source = current();
-      const pending = source.ok ? await session.getPendingChanges(source.identity.chatKey) : [];
+      const pending = source.ok ? await readBackupRecords(session, source.identity.chatKey, 'pending_changes') : [];
       const meta = await session.getChatMeta(snapshot.header.chatKey);
       let restore = null, reason = "";
       try { ensureStopped(); restore = await previewSnapshotRestore({ snapshot, current: source, pending }); }
@@ -78,14 +79,14 @@ export function createSnapshotController({ storage, getContextReader, runGuard =
             const result = await executeRestorePlan({
               plan: preview.plan,
               readCurrent: current,
-              readPending: key => session.getPendingChanges(key),
+              readPending: key => readBackupRecords(session, key, 'pending_changes'),
               replacePending: records => {
                 if (firstPendingWrite) {
                   for (const record of records) { record.id = `${preview.plan.chatKey}:snapshot-restore`; record.snapshotSaveProof = saveProof; }
                   writtenProtection = records;
                   firstPendingWrite = false;
                 }
-                return session.replacePendingChanges({ chatKey: preview.plan.chatKey, records });
+                return writeBackupRecords(session, { chatKey: preview.plan.chatKey, store: 'pending_changes', rows: records, replace: true });
               },
               beforeApply: async () => {
                 ensureStopped();
@@ -101,7 +102,7 @@ export function createSnapshotController({ storage, getContextReader, runGuard =
               },
               save: ({ current: target }) => waitForSave({ save: () => {
                 const latest = current();
-                if (!latest.ok || latest.identity.chatKey !== preview.plan.chatKey || stableText([latest.chat, latest.context.chatMetadata ?? {}]) !== stableText([snapshot.chat, metadata])) throw new Error("保存前目标聊天已变化，已停止请求酒馆保存。");
+                if (!latest.ok || latest.identity.chatKey !== preview.plan.chatKey || !sameSnapshotContent(latest.chat, snapshot.chat) || !sameSnapshotContent(latest.context.chatMetadata ?? {}, metadata)) throw new Error("保存前目标聊天已变化，已停止请求酒馆保存。");
                 return target.context.saveChat();
               } }),
             });
@@ -110,10 +111,9 @@ export function createSnapshotController({ storage, getContextReader, runGuard =
             let backend;
             try { backend = await readBackend({ current: target }); }
             catch (error) { backend = { ok: false, reason: error.message }; }
-            const expected = stableText([snapshot.chat, metadata]);
             const stillCurrent = () => {
               const value = current();
-              return value.ok && value.identity.chatKey === preview.plan.chatKey && stableText([value.chat, value.context.chatMetadata ?? {}]) === expected;
+              return value.ok && value.identity.chatKey === preview.plan.chatKey && sameSnapshotContent(value.chat, snapshot.chat) && sameSnapshotContent(value.context.chatMetadata ?? {}, metadata);
             };
             const confirmedSave = result.stage !== "render" && verifyNativeSnapshotSave({ snapshot, metadata, backend }) && stillCurrent();
             if (confirmedSave && writtenProtection.length) await session.deletePendingChangesIfUnchanged(writtenProtection, { shouldDelete: stillCurrent, signal: new AbortController().signal });

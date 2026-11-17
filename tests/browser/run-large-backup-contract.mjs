@@ -53,7 +53,19 @@ try {
         if (fullReads !== 0 || latest.code !== 'checking') throw new Error('incremental read/status failure: ' + fullReads + '/' + latest.code + '/' + latest.detail);
         const final = await readBackupRecords(session, 'coordinator', 'full_messages');
         if (final.length !== 3001 || final[427].raw.mes !== 'edited') throw new Error('mixed event lost');
-        return { count: records.length, ticks, elapsedMs: Math.round(performance.now() - start), rollback: failed, schema: 8, incrementalFullReads: fullReads, mixedEvent: true };
+        const incrementalFullReads = fullReads;
+        const { createRestoreController } = await import('/src/controllers/restore-controller.js');
+        const { createPanelController } = await import('/src/controllers/panel-controller.js');
+        const storage = { getMode: () => 'indexeddb', open: async () => { const opened = await adapter.open(); return { ...opened, getFullMessages: () => { throw new Error('panel legacy full read'); }, getBackupPage: options => { if (options.store === 'full_messages') fullReads++; return opened.getBackupPage(options); } }; } };
+        const settings = { enabled: true, fullBackupEnabled: true, recentBackupEnabled: true };
+        const restorer = createRestoreController({ storage, getContextReader: () => ({ readCurrentChat: () => current }), getSettings: () => settings, setStatus: value => { latest = value; } });
+        document.body.innerHTML = '<section id="boxed-lllllabc-settings-panel"><div id="boxed-lllllabc-settings-panel-body"></div></section>';
+        const panel = createPanelController({ storage, getContextReader: () => ({ readCurrentChat: () => current }), getSettings: () => settings, getLatestStatus: () => latest, createRestoreUiState: restorer.createRestoreUiState });
+        await panel.renderPanel('settings');
+        if (fullReads !== 0 || !document.body.textContent.includes('3001 层')) throw new Error('panel eagerly reads full backup or loses summary');
+        const buttons = [...document.querySelectorAll('.boxed-lllllabc-primary-action')];
+        if (buttons.length !== 4) throw new Error('primary UI flow changed');
+        return { count: records.length, ticks, elapsedMs: Math.round(performance.now() - start), rollback: failed, schema: 8, incrementalFullReads, mixedEvent: true, panelFullReads: fullReads, primaryActions: buttons.length };
       } finally { clearInterval(timer); session.close(); }
     });
     assert.equal(result.count, 3000); assert(result.ticks > 0); console.log(JSON.stringify({ mobile, ...result })); await context.close();

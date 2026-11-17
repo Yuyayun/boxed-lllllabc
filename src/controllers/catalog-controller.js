@@ -64,7 +64,7 @@ export function createCatalogController({
       if (!validation.ok) {
         return validation;
       }
-      const result = await session.deleteBackupTypeForChat({
+      const result = session.capabilities?.boundedBackup ? await session.deleteBackupV2({ chatKey: plan.chatKey, store: { recent: 'recent_messages', full: 'full_messages', historical: 'historical_changes' }[plan.type], revision: currentChat.revision }) : await session.deleteBackupTypeForChat({
         chatKey: plan.chatKey,
         type: plan.type,
         expectedFingerprint: plan.expectedFingerprint,
@@ -113,6 +113,7 @@ export function createCatalogController({
           if (mode !== plan?.mode) throw Object.assign(new Error("当前备份位置已变化，请重新预览。"), { code: "stale-cleanup-plan" });
           submitted = true;
           // The port rechecks the whole scope inside the deletion transaction.
+          if (session.capabilities?.boundedBackup) return await session.deleteBackupBatchV2({ selection: plan.selection, revision: Number(plan.guards[0]?.metaFingerprint?.split(':')[1]), mode, confirmed: true });
           return await session.deleteBackupBatch({ plan, confirmed: true });
         } finally { session?.close?.(); }
       });

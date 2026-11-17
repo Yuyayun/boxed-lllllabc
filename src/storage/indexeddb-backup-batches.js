@@ -16,6 +16,7 @@ const iterate = (source, range, callback, direction = 'next') => new Promise((re
 });
 export function createIndexedDbBackupBatches({ openDatabase }) {
   return createLargeBackupOperations({
+    mode: 'indexeddb',
     async transaction(mode, callback) {
       const db = await openDatabase();
       try {
@@ -82,7 +83,7 @@ export function createIndexedDbBackupBatches({ openDatabase }) {
                 for (const key of sorted.slice(0, 20)) {
                   const chatMeta = await port.get('chat_meta', key);
                   try { const entry = storedChatSummary(key, chatMeta, await stats(key), await port.revision()); if (entry) items.push(entry); }
-                  catch { items.push({ chatKey: key, displayName: chatMeta?.chatId ?? key, ownerKey: 'other', recordCount: 0, storageBytes: 0, error: '此聊天的备份摘要暂时无法读取。' }); }
+                  catch { const counts = await port.counts(key); const entry = storedChatSummary(key, chatMeta, Object.fromEntries(Object.entries(counts).map(([name, count]) => [name, { count, bytes: 0, firstIndex: null, lastIndex: null }])), await port.revision()); if (entry) items.push({ ...entry, error: '此聊天的备份摘要暂时无法读取。' }); }
                 }
                 return { items, after: sorted.length > 20 ? sorted[19] : null };
               },
