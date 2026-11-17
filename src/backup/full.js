@@ -85,7 +85,8 @@ export function createFullBackupDecision({
   if (currentMessages.length > existing.length) {
     return {
       action: "append",
-      messages: currentMessages.slice(existing.length),
+      messages: [...new Set([...targetIndexes, ...currentMessages.slice(existing.length).map(message => message.messageIndex)])]
+        .sort((a, b) => a - b).map(index => currentMessages[index]).filter(Boolean),
       currentMessages,
       eventInfo,
     };

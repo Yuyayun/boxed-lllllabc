@@ -40,7 +40,20 @@ try {
         let unchanged = true;
         try { await writeBackupRecords(session, { chatKey: 'large', store: 'full_messages', rows: rows.slice(0, 100), replace: true, sourceUnchanged: () => { unchanged = !unchanged; return unchanged; } }); } catch {}
         if ((await session.getBackupSummary('large')).counts.full_messages !== 3000) throw new Error('changed source published');
-        return { count: records.length, ticks, elapsedMs: Math.round(performance.now() - start), rollback: failed, schema: 8 };
+        const { createBackupCoordinator } = await import('/src/controllers/backup-coordinator.js');
+        let latest, fullReads = 0;
+        const current = { ok: true, chat: rows.slice(0, 3000).map(row => row.raw), identity: { ok: true, chatKey: 'coordinator', meta: { chatKey: 'coordinator', chatId: 'coordinator' } } };
+        const adapter = createIndexedDbStorage();
+        const coordinator = createBackupCoordinator({ storage: { open: async () => { const opened = await adapter.open(); return { ...opened, getFullMessages: () => { throw new Error('legacy full read'); }, getBackupPage: options => { if (options.store === 'full_messages') fullReads++; return opened.getBackupPage(options); } }; } }, getContextReader: () => ({ readCurrentChat: () => current }), getSettings: () => ({ enabled: true, fullBackupEnabled: true, recentBackupEnabled: true, historicalBackupEnabled: true, recentLimit: 2 }), getLatestStatus: () => latest, setStatus: value => { latest = value; }, refreshVisiblePanel: async () => {}, clearScheduledVerification() {}, scheduleBackendVerification() {}, scheduleBackendSnapshotVerification() {}, readChatCatalog: async () => [] });
+        await coordinator.runBackupNow({ eventName: 'extension-loaded', args: [] });
+        if (latest.code !== 'saved') throw new Error('coordinator initialize: ' + latest.detail);
+        fullReads = 0; current.chat[427].mes = 'edited'; current.chat.push({ mes: 'new tail' });
+        coordinator.noteSourceChange();
+        await coordinator.runBackupNow({ eventName: 'batched', triggers: [{ eventName: 'message_edited', args: [427] }, { eventName: 'message_received', args: [3000] }] });
+        if (fullReads !== 0 || latest.code !== 'checking') throw new Error('incremental read/status failure: ' + fullReads + '/' + latest.code + '/' + latest.detail);
+        const final = await readBackupRecords(session, 'coordinator', 'full_messages');
+        if (final.length !== 3001 || final[427].raw.mes !== 'edited') throw new Error('mixed event lost');
+        return { count: records.length, ticks, elapsedMs: Math.round(performance.now() - start), rollback: failed, schema: 8, incrementalFullReads: fullReads, mixedEvent: true };
       } finally { clearInterval(timer); session.close(); }
     });
     assert.equal(result.count, 3000); assert(result.ticks > 0); console.log(JSON.stringify({ mobile, ...result })); await context.close();

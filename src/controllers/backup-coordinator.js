@@ -20,6 +20,9 @@ import {
 } from "../rename/legacy-rename.js";
 import { formatStatusText } from "../ui/presentation.js";
 import { readBackendChat } from "../verifier/backend-reader.js";
+import { refreshBoundedFullBackup } from '../backup/full-bounded.js';
+import { readBackupRecords, writeBackupRecords } from '../storage/backup-batches.js';
+import { backupFailureStatus } from '../backup/failure-status.js';
 
 export function createBackupCoordinator({
   storage = defaultBackupStorage,
@@ -40,8 +43,15 @@ export function createBackupCoordinator({
   readRenameBackend = readBackendChat,
 }) {
   let legacyRenameObservation = null;
+  const fullViews = new Map();
+  const backupProblems = new Map();
+  let sourceEpoch = 0, queuedBackup = Promise.resolve();
+  function runBackupNow(trigger = {}) {
+    const run = queuedBackup.then(() => runBackupNowImpl(trigger));
+    queuedBackup = run.catch(() => {}); return run;
+  }
 
-  async function runBackupNow(trigger = {}) {
+  async function runBackupNowImpl(trigger = {}) {
     const eventName = typeof trigger === "string" ? trigger : trigger.eventName || "manual";
     const args = typeof trigger === "string" ? [] : trigger.args || [];
     const verifyNow = typeof trigger === "object" && Boolean(trigger.verifyNow);
@@ -80,17 +90,7 @@ export function createBackupCoordinator({
       return identityStatus;
     }
 
-    const fullStatus = await refreshFullBackup({
-      current,
-      settings,
-      triggers: triggerList,
-      reason: eventName,
-    });
-    if (fullStatus?.code === "db-error") {
-      setStatus(fullStatus);
-      await refreshVisiblePanel();
-      return fullStatus;
-    }
+    const failures = [];
 
     try {
       const session = await storage.open();
@@ -102,16 +102,14 @@ export function createBackupCoordinator({
           args: item.args,
         }));
 
-        await session.putPendingChanges(pendingRecords);
+        const records = [...new Map(pendingRecords.map(row => [row.id, row])).values()];
+        if (records.length) await writeBackupRecords(session, { chatKey: current.identity.chatKey, store: 'pending_changes', rows: records });
       } finally {
         session.close();
       }
     } catch (error) {
       console.error("[boxed-lllllabc] pending 写入失败", error);
-      const status = createBackupStatus("db-error", "备份不可用", error);
-      setStatus(status);
-      await refreshVisiblePanel();
-      return status;
+      failures.push(backupFailureStatus(error));
     }
 
     const historicalStatus = await refreshHistoricalBackup({
@@ -119,11 +117,7 @@ export function createBackupCoordinator({
       settings,
       triggers: triggerList,
     });
-    if (historicalStatus?.code === "db-error") {
-      setStatus(historicalStatus);
-      await refreshVisiblePanel();
-      return historicalStatus;
-    }
+    if (historicalStatus) failures.push(historicalStatus);
 
     if (settings.recentBackupEnabled) {
       const recentStatus = await refreshRecentBackup({
@@ -134,13 +128,13 @@ export function createBackupCoordinator({
         triggers: triggerList,
       });
 
-      if (recentStatus.code === "db-error") {
-        setStatus(recentStatus);
-        await refreshVisiblePanel();
-        return recentStatus;
-      }
+      if (['db-error','backup-update-failed'].includes(recentStatus.code)) failures.push(recentStatus);
     }
 
+    const fullStatus = await refreshFullBackup({ current, settings, triggers: triggerList, reason: eventName });
+    if (['db-error','backup-update-failed'].includes(fullStatus?.code)) failures.push(fullStatus);
+    if (failures.length) { backupProblems.set(current.identity.chatKey, failures[0]); setStatus(failures[0]); await refreshVisiblePanel(); return failures[0]; }
+    backupProblems.delete(current.identity.chatKey);
     const pending = await readCurrentPending(current.identity.chatKey);
     const requestedStatus = fullStatus?.code === "full-frozen"
       ? fullStatus
@@ -198,6 +192,10 @@ export function createBackupCoordinator({
     try {
       const session = await storage.open();
       try {
+        if (session.capabilities?.boundedBackup) {
+          const result = await refreshBoundedFullBackup({ session, current, settings, triggers, reason, backendConfirmed, views: fullViews, readCurrent: () => getContextReader().readCurrentChat(), epoch: () => sourceEpoch });
+          return result ? createBackupStatus(result.code, result.shortText, result.detail ?? '') : null;
+        }
         const [meta, messages] = await Promise.all([
           session.getChatMeta(current.identity.chatKey),
           session.getFullMessages(current.identity.chatKey),
@@ -265,17 +263,9 @@ export function createBackupCoordinator({
           reason,
         });
         if (["create", "rebuild", "unfreeze", "reconcile"].includes(decision.action)) {
-          await session.replaceFullSnapshot({
-            chatKey: current.identity.chatKey,
-            messages: decision.currentMessages,
-            meta: nextMeta,
-          });
+          await writeBackupRecords(session, { chatKey: current.identity.chatKey, store: 'full_messages', rows: decision.currentMessages, meta: nextMeta, replace: true });
         } else {
-          await session.putFullMessages({
-            chatKey: current.identity.chatKey,
-            messages: decision.messages,
-            meta: nextMeta,
-          });
+          await writeBackupRecords(session, { chatKey: current.identity.chatKey, store: 'full_messages', rows: decision.messages, meta: nextMeta });
         }
         return null;
       } finally {
@@ -283,7 +273,7 @@ export function createBackupCoordinator({
       }
     } catch (error) {
       console.error("[boxed-lllllabc] 完整聊天备份失败", error);
-      return createBackupStatus("db-error", "备份不可用", error);
+      return backupFailureStatus(error);
     }
   }
 
@@ -445,7 +435,8 @@ export function createBackupCoordinator({
     try {
       const session = await storage.open();
       try {
-        await session.putHistoricalChanges(records);
+        await writeBackupRecords(session, { chatKey: current.identity.chatKey, store: 'historical_changes', rows: records });
+        if (session.capabilities?.boundedBackup) return;
         const historicalChanges = await session.getHistoricalChanges(current.identity.chatKey);
         await session.updateChatMetaSummary(current.identity.chatKey, {
           historicalCount: historicalChanges.length,
@@ -461,6 +452,7 @@ export function createBackupCoordinator({
   }
 
   async function prioritizeFullBackupStatus(chatKey, status) {
+    if (backupProblems.has(chatKey)) return backupProblems.get(chatKey);
     const settings = getSettings();
     if (!settings.enabled || !settings.fullBackupEnabled) {
       return status;
@@ -506,7 +498,7 @@ export function createBackupCoordinator({
   async function readCurrentPending(chatKey) {
     const session = await storage.open();
     try {
-      return await session.getPendingChanges(chatKey);
+      return await readBackupRecords(session, chatKey, 'pending_changes');
     } finally {
       session.close();
     }
@@ -538,6 +530,7 @@ export function createBackupCoordinator({
   }
 
   return {
+    noteSourceChange() { sourceEpoch++; },
     confirmFullBackupAfterBackendVerification,
     createDisplayStatus,
     handleChatRenamed,

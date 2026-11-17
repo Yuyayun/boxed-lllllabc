@@ -252,7 +252,7 @@ function getVisualStatus(code) {
     return "saved";
   }
 
-  if (code === "failed" || code === "verify-unavailable" || code === "db-error" || code === "full-frozen") {
+  if (code === "failed" || code === "verify-unavailable" || code === "db-error" || code === "full-frozen" || code === 'backup-update-failed' || code === 'backup-read-failed') {
     return "failed";
   }
 

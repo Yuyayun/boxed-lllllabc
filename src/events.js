@@ -5,6 +5,7 @@ export function registerBackupEvents({
   eventTypes,
   onBackupNeeded,
   onChatRenamed,
+  onObserved = () => {},
   debounceMs = DEFAULT_DEBOUNCE_MS,
 }) {
   const eventNames = pickEventNames(eventTypes);
@@ -87,6 +88,7 @@ export function registerBackupEvents({
     if (typeof eventSource?.on === "function") {
       const handler = (...args) => {
         const trigger = { eventName, args };
+        onObserved(trigger);
         if (renameEventName && eventName === renameEventName) {
           return enqueueRename(trigger);
         }

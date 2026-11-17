@@ -1,6 +1,7 @@
 import { canonicalizeRecentMessages } from "./canonicalize.js";
 import { classifyTriggers } from "./full.js";
 import { defaultBackupStorage } from "../storage/service.js";
+import { readBackupRecords, writeBackupRecords } from '../storage/backup-batches.js';
 
 export function createBackupStatus(code, shortText, detail = "") {
   const errorName = detail instanceof Error ? String(detail.name || "") : "";
@@ -49,7 +50,7 @@ export async function refreshRecentBackup({ contextReader, settings, reason = "u
   try {
     const session = await storage.open();
     try {
-      const existingMessages = await session.getRecentMessages(current.identity.chatKey);
+      const existingMessages = await readBackupRecords(session, current.identity.chatKey, 'recent_messages');
       if (shouldPreserveRecentSnapshot({
         existingMessages,
         currentChat: current.chat,
@@ -59,10 +60,7 @@ export async function refreshRecentBackup({ contextReader, settings, reason = "u
         return createBackupStatus("recent-preserved", `已保留较长的最近 ${existingMessages.length} 层备份`);
       }
 
-      await session.replaceRecentSnapshot({
-        meta,
-        messages,
-      });
+      await writeBackupRecords(session, { chatKey: current.identity.chatKey, store: 'recent_messages', rows: messages, meta, replace: true });
     } finally {
       session.close();
     }

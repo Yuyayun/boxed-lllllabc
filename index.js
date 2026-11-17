@@ -338,6 +338,7 @@ jQuery(async () => {
   ensureMagicWandEntry();
 
   backupEvents = registerBackupEvents({
+    onObserved: () => backupCoordinator.noteSourceChange(),
     eventSource,
     eventTypes: event_types,
     onChatRenamed: async (trigger) => {
