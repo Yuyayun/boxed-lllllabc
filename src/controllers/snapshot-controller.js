@@ -74,19 +74,22 @@ export function createSnapshotController({ storage, getContextReader, runGuard =
             const saveProof = await createSnapshotSaveProof(metadata);
             let firstPendingWrite = true;
             let writtenProtection = [];
+            let pendingSummary;
             validateNativeSnapshotPayload(snapshot, metadata);
             for (const method of ["updateChatMetadata", "saveChat", "clearChat", "printMessages"]) if (typeof source.context?.[method] !== "function") throw new Error("当前酒馆缺少安全恢复接口，聊天保持原样。");
             const result = await executeRestorePlan({
               plan: preview.plan,
               readCurrent: current,
-              readPending: key => readBackupRecords(session, key, 'pending_changes'),
-              replacePending: records => {
+              readPending: async key => { pendingSummary = session.capabilities?.boundedBackup ? await session.getBackupSummary(key) : undefined; return readBackupRecords(session, key, 'pending_changes', { summary: pendingSummary }); },
+              replacePending: async records => {
                 if (firstPendingWrite) {
                   for (const record of records) { record.id = `${preview.plan.chatKey}:snapshot-restore`; record.snapshotSaveProof = saveProof; }
                   writtenProtection = records;
                   firstPendingWrite = false;
                 }
-                return writeBackupRecords(session, { chatKey: preview.plan.chatKey, store: 'pending_changes', rows: records, replace: true });
+                const receipt = await writeBackupRecords(session, { chatKey: preview.plan.chatKey, store: 'pending_changes', rows: records, replace: true, summary: pendingSummary });
+                if (receipt?.committedRevision !== undefined) pendingSummary = { ...pendingSummary, revision: receipt.committedRevision };
+                return receipt;
               },
               beforeApply: async () => {
                 ensureStopped();

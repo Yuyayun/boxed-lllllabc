@@ -60,7 +60,7 @@ export function createRestoreController({
         } catch (error) { const status = backupFailureStatus(error, '读取'); setStatus(status); globalThis.toastr?.error?.(status.detail, '箱装辣白菜'); return { ok: false, reason: status.detail }; }
         finally { session?.close?.(); }
       };
-      return { fullPlan: { totalCount: summary.counts.full_messages }, disabledReason: getSettings().enabled ? '' : '请先启用备份，再执行恢复或请求酒馆保存。',
+      return { fullPlan: { totalCount: summary.counts.full_messages }, recentOptions: createRecentRestoreOptions({ chat: current.chat, recent: messages }), disabledReason: getSettings().enabled ? '' : '请先启用备份，再执行恢复或请求酒馆保存。',
         onRequestSave: getSettings().enabled ? () => load('onRequestSave') : undefined,
         onOpenRecovery: () => load('onOpenRecovery'), onPreviewFull: () => load('onPreviewFull'),
         onPreviewRecent: index => load('onPreviewRecent', index), onPreviewHistorical: index => load('onPreviewHistorical', index), onPreviewPending: () => load('onPreviewPending') };
@@ -210,10 +210,16 @@ export function createRestoreController({
   const confirmRestore = (plan) => runGuard(() => confirmRestoreImpl(plan)).catch((error) => ({ ok: false, reason: error.message }));
   async function confirmRestoreImpl(plan) {
     const contextReader = getContextReader();
+    let pendingSummary;
     const result = await executeRestorePlan({
       plan,
       readCurrent: () => contextReader.readCurrentChat(),
-      readPending: (chatKey) => readCurrentPending(chatKey),
+      readPending: async chatKey => {
+        if (plan.source !== 'full') return readCurrentPending(chatKey);
+        const session = await storage.open();
+        try { pendingSummary = session.capabilities?.boundedBackup ? await session.getBackupSummary(chatKey) : undefined; return await readBackupRecords(session, chatKey, 'pending_changes', { summary: pendingSummary }); }
+        finally { session.close(); }
+      },
       writePending: async (records) => {
         const session = await storage.open();
         try {
@@ -225,7 +231,8 @@ export function createRestoreController({
       replacePending: async (records) => {
         const session = await storage.open();
         try {
-          await writeBackupRecords(session, { chatKey: plan.chatKey, store: 'pending_changes', rows: records, replace: true });
+          const receipt = await writeBackupRecords(session, { chatKey: plan.chatKey, store: 'pending_changes', rows: records, replace: true, summary: pendingSummary });
+          if (receipt?.committedRevision !== undefined) pendingSummary = { ...pendingSummary, revision: receipt.committedRevision };
         } finally {
           session.close();
         }

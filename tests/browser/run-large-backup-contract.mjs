@@ -10,7 +10,7 @@ const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, 'http://localhost');
   if (url.pathname === '/') { response.setHeader('Content-Type', 'text/html'); response.end('<meta name="viewport" content="width=device-width"><button id="alive">test</button>'); return; }
   const file = path.resolve(root, '.' + url.pathname);
-  if (!file.startsWith(root) || !url.pathname.startsWith('/src/')) { response.writeHead(404).end(); return; }
+  if (!file.startsWith(root) || !(url.pathname.startsWith('/src/') || url.pathname.startsWith('/tests/browser/'))) { response.writeHead(404).end(); return; }
   try { response.setHeader('Content-Type', 'text/javascript'); response.end(await fs.readFile(file)); } catch { response.writeHead(404).end(); }
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -68,6 +68,25 @@ try {
         return { count: records.length, ticks, elapsedMs: Math.round(performance.now() - start), rollback: failed, schema: 8, incrementalFullReads, mixedEvent: true, panelFullReads: fullReads, primaryActions: buttons.length };
       } finally { clearInterval(timer); session.close(); }
     });
-    assert.equal(result.count, 3000); assert(result.ticks > 0); console.log(JSON.stringify({ mobile, ...result })); await context.close();
+    assert.equal(result.count, 3000); assert(result.ticks > 0);
+    const jobId = await page.evaluate(async () => {
+      const { createIndexedDbStorage } = await import('/src/storage/indexeddb-adapter.js');
+      const session = await createIndexedDbStorage().open(), summary = await session.getBackupSummary('large');
+      const job = await session.beginBackupWrite({ chatKey: 'large', store: 'full_messages', count: 10000, revision: summary.revision, meta: { fullBackupMessageCount: 10000 } });
+      for (let start = 0; start < 10000; start += 50) await session.appendBackupWrite({ id: job.id, start, rows: Array.from({ length: 50 }, (_, i) => ({ messageIndex: start + i, raw: { mes: 'replacement' } })) });
+      session.close(); return job.id;
+    });
+    await page.evaluate(async id => {
+      const { createIndexedDbStorage } = await import('/src/storage/indexeddb-adapter.js');
+      const session = await createIndexedDbStorage().open();
+      globalThis.interruptedCommit = session.commitBackupWrite({ id }).catch(() => {});
+    }, jobId);
+    await new Promise(resolve => setTimeout(resolve, 20)); await page.close();
+    const reopened = await context.newPage(); await reopened.goto(`http://127.0.0.1:${server.address().port}`);
+    const reopenedCount = await reopened.evaluate(async () => { const { createIndexedDbStorage } = await import('/src/storage/indexeddb-adapter.js'); const session = await createIndexedDbStorage().open(); try { return (await session.getBackupSummary('large')).counts.full_messages; } finally { session.close(); } });
+    assert([3000, 10000].includes(reopenedCount), 'closing the page published a partial IDB transaction');
+    const snapshotUiCases = await reopened.evaluate(async () => (await import('/tests/browser/snapshot-ui-contract.js')).runSnapshotUiContract());
+    assert.equal(snapshotUiCases.length, 12);
+    console.log(JSON.stringify({ mobile, ...result, interruptedCommitCount: reopenedCount, atomicClose: true, snapshotUiCases: snapshotUiCases.length })); await context.close();
   }
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }

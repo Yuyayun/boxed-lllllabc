@@ -30,6 +30,7 @@ export function renderCurrentChatPanel(container, {
     renderLine("酒馆保存状态", status.shortText),
     renderLine("上次检查", formatDate(status.updatedAt)),
   );
+  if (['backup-update-failed','backup-read-failed'].includes(status.code) && status.detail) summary.append(renderLine('本次操作', status.detail));
 
   for (const row of buildVisibleChatSummary(meta)) {
     summary.append(renderLine(row.label, row.value));
@@ -77,10 +78,10 @@ function renderFullSection(messages, meta = {}, settings = {}, restore = {}, fro
   heading.textContent = meta.chatDisplayName || meta.chatFile || meta.chatId || "当前聊天";
   const detail = document.createElement("span");
   detail.className = "boxed-lllllabc-recent-file-meta";
-  detail.textContent = summaryCount !== undefined ? `${summaryCount} 层 · ${meta.fullBackupState === 'frozen' ? '已暂停更新，原备份保留' : meta.fullBackupState === 'awaiting-confirmation' ? '等待酒馆保存确认' : '更新于 ' + formatDate(meta.fullBackupAt)}` : formatFullBackupDetail(messages, meta, settings);
+  detail.textContent = summaryCount !== undefined ? `${summaryCount} 层 · ${!settings.enabled || !settings.fullBackupEnabled ? '已暂停更新' : meta.fullBackupState === 'frozen' ? '已暂停更新，原备份保留' : meta.fullBackupState === 'awaiting-confirmation' ? '等待酒馆保存确认' : '更新于 ' + formatDate(meta.fullBackupAt)}` : formatFullBackupDetail(messages, meta, settings);
   const preview = document.createElement("span");
   preview.className = "boxed-lllllabc-recent-file-preview";
-  preview.textContent = summaryCount !== undefined ? '预览恢复时读取完整内容' : getMessagePreview(messages.at(-1));
+  preview.textContent = summaryCount !== undefined ? '可预览备份并确认整聊恢复' : getMessagePreview(messages.at(-1));
   main.append(heading, detail, preview);
   file.append(main);
   const actions = document.createElement("div");

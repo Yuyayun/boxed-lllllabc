@@ -117,6 +117,7 @@ function initializeControllers() {
   };
 
   backupCoordinator = createBackupCoordinator({
+    prepareBackup: async () => { backendVerifier?.clearScheduledVerification(); await backendVerifier?.whenIdle(); },
     storage: backupStorage,
     getContextReader,
     getSettings,

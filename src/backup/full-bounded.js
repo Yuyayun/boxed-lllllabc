@@ -9,11 +9,13 @@ export async function refreshBoundedFullBackup({ session, current, triggers, rea
   const info = classifyTriggers(triggers, current.chat.length), view = views.get(key);
   if (info.onlyIgnoredFirstMessage) return null;
   const frozen = meta.fullBackupState === 'frozen', awaiting = meta.fullBackupState === 'awaiting-confirmation';
+  const unknownTarget = triggers.some(trigger => /edited|updated|swiped|swipe_deleted|reasoning/.test(trigger.eventName) && !(trigger.args ?? []).some(value => (typeof value === 'number' || typeof value === 'string' && value.trim()) && Number.isSafeInteger(Number(value)) && Number(value) >= 0 && Number(value) < current.chat.length));
   const trusted = !frozen && !awaiting && view?.count === count && view?.at === meta.fullBackupAt
-    && triggers.length && triggers.every(trigger => contentEvents.has(trigger.eventName)) && !info.hasDelete && current.chat.length >= count;
+    && triggers.length && triggers.every(trigger => contentEvents.has(trigger.eventName)) && !unknownTarget && !info.hasDelete && current.chat.length >= count;
   const observedEpoch = epoch(), length = current.chat.length;
   const unchanged = () => { const latest = readCurrent(); return epoch() === observedEpoch && latest.ok && latest.identity.chatKey === key && latest.chat.length === length; };
   const targets = new Set(info.targetIndexes);
+  if (unknownTarget) targets.clear();
   let source, replace = false;
   if (trusted) {
     for (let i = count; i < length; i++) targets.add(i);
@@ -23,6 +25,8 @@ export async function refreshBoundedFullBackup({ session, current, triggers, rea
     source = structuredClone(current.chat);
     if (count) {
       const old = await readBackupRecords(session, key, 'full_messages', { hashesOnly: true, summary });
+      const live = readCurrent();
+      if (!unchanged() || !source.every((row, index) => stableText(row) === stableText(live.chat[index]))) throw backupFailure('来源聊天在核对期间发生变化，已有备份已保留。', 'backup-source-changed');
       if (old.some((row, index) => row.messageIndex !== index)) throw backupFailure('完整备份楼层不连续，已有备份已保留。');
       const differing = old.findIndex((row, index) => index >= length || row.canonicalHash !== hashCanonicalMessage(source[index]));
       if (frozen && !(differing === -1 && length >= count) && !(backendConfirmed && meta.fullBackupIncident?.kind === 'unexpected-message-change' && length >= count)) return { code: 'full-frozen', shortText: '完整备份已暂停更新' };

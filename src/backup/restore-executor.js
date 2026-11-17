@@ -51,6 +51,9 @@ export async function executeRestorePlan({
   let snapshot;
   try {
     await beforeApply({ current, plan });
+    const latest = await readCurrent();
+    const rechecked = validateRestorePlan({ plan, chat: latest?.chat, chatKey: latest?.identity?.chatKey, pending });
+    if (!latest?.ok || latest.chat !== current.chat || !rechecked.ok) throw new Error(rechecked.reason || '来源聊天在恢复准备期间发生变化。');
     snapshot = applyRestorePlan(current.chat, plan);
   } catch (error) {
     if (plan.source === "full") {

@@ -14,6 +14,7 @@ import { readBackupRecords, writeBackupRecords } from '../storage/backup-batches
 import { storedChatSummary } from '../storage/backup-catalog-summary.js';
 import { buildResolvedFullBackupMeta } from '../backup/frozen-resolution.js';
 import { backupFailureStatus } from '../backup/failure-status.js';
+import { stableText } from '../storage/value-digest.js';
 import {
   closeStatusDialog,
   openStatusDialog,
@@ -292,11 +293,15 @@ export function createPanelController({
       }
 
       const now = new Date().toISOString();
-      const messages = action === FROZEN_FULL_BACKUP_ACTIONS.adoptCurrent
+      const source = state && action === FROZEN_FULL_BACKUP_ACTIONS.adoptCurrent ? structuredClone(current.chat) : null;
+      const observedLength = current.chat.length;
+      const messages = source ? source.map((_raw, messageIndex) => ({ messageIndex })) : action === FROZEN_FULL_BACKUP_ACTIONS.adoptCurrent
         ? current.chat.map((message, index) => canonicalizeMessage(message, index, now))
         : [];
-      const result = state ? await writeBackupRecords(session, { chatKey: plan.chatKey, store: 'full_messages', rows: messages, replace: true, summary: state, meta: buildResolvedFullBackupMeta({ action, currentMeta: meta, identityMeta: current.identity.meta, messages, now }), sourceUnchanged: () => {
-        const live = contextReader.readCurrentChat(); return live.ok && live.identity.chatKey === plan.chatKey && hashCanonicalChat(live.chat) === plan.expectedCurrentChatHash;
+      const result = state ? await writeBackupRecords(session, { chatKey: plan.chatKey, store: 'full_messages', rows: source ?? messages, mapRow: source ? (raw, index) => canonicalizeMessage(raw, index, now) : undefined, replace: true, summary: state, meta: buildResolvedFullBackupMeta({ action, currentMeta: meta, identityMeta: current.identity.meta, messages, now }), sourceUnchanged: () => {
+        const live = contextReader.readCurrentChat(); return live.ok && live.identity.chatKey === plan.chatKey && live.chat.length === observedLength;
+      }, validateSource: () => {
+        const live = contextReader.readCurrentChat(); return live.ok && live.identity.chatKey === plan.chatKey && (source ? source.length === live.chat.length && source.every((raw, index) => stableText(raw) === stableText(live.chat[index])) : hashCanonicalChat(live.chat) === plan.expectedCurrentChatHash);
       } }) : await session.resolveFrozenFullBackup({
         chatKey: plan.chatKey,
         action,

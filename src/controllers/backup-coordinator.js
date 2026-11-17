@@ -21,7 +21,7 @@ import {
 import { formatStatusText } from "../ui/presentation.js";
 import { readBackendChat } from "../verifier/backend-reader.js";
 import { refreshBoundedFullBackup } from '../backup/full-bounded.js';
-import { readBackupRecords, writeBackupRecords } from '../storage/backup-batches.js';
+import { readBackupRecords, writeBackupRecords, backupBatches, backupFailure } from '../storage/backup-batches.js';
 import { backupFailureStatus } from '../backup/failure-status.js';
 
 export function createBackupCoordinator({
@@ -41,6 +41,7 @@ export function createBackupCoordinator({
   readChatCatalog = readOwnerChatCatalog,
   readRenameSourceMeta = (chatKey) => readStoredChatMeta(storage, chatKey),
   readRenameBackend = readBackendChat,
+  prepareBackup = async () => {},
 }) {
   let legacyRenameObservation = null;
   const fullViews = new Map();
@@ -67,6 +68,7 @@ export function createBackupCoordinator({
       return status;
     }
 
+    await prepareBackup();
     const contextReader = getContextReader();
     const current = contextReader.readCurrentChat();
     if (!current.ok) {
@@ -196,10 +198,9 @@ export function createBackupCoordinator({
           const result = await refreshBoundedFullBackup({ session, current, settings, triggers, reason, backendConfirmed, views: fullViews, readCurrent: () => getContextReader().readCurrentChat(), epoch: () => sourceEpoch });
           return result ? createBackupStatus(result.code, result.shortText, result.detail ?? '') : null;
         }
-        const [meta, messages] = await Promise.all([
-          session.getChatMeta(current.identity.chatKey),
-          session.getFullMessages(current.identity.chatKey),
-        ]);
+        const meta = await session.getChatMeta(current.identity.chatKey);
+        if (session.capabilities && !session.capabilities.boundedBackup && ((meta?.fullBackupMessageCount ?? 0) > 200 || backupBatches(current.chat).length > 1)) throw backupFailure('服务器备份插件需要更新，才能分批处理此聊天。', 'backup-upgrade-required');
+        const messages = await session.getFullMessages(current.identity.chatKey);
         const decision = createFullBackupDecision({
           existingMessages: messages,
           currentChat: current.chat,
@@ -447,7 +448,7 @@ export function createBackupCoordinator({
       }
     } catch (error) {
       console.error("[boxed-lllllabc] 历史楼层备份失败", error);
-      return createBackupStatus("db-error", "备份不可用", error);
+      return backupFailureStatus(error);
     }
   }
 

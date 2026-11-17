@@ -275,9 +275,10 @@ function renderCatalogEntry(chat) {
   );
   entry.append(header, inventory);
 
-  if (chat.isFrozen || chat.isAwaitingConfirmation || chat.pending.count) {
+  if (chat.error || chat.isFrozen || chat.isAwaitingConfirmation || chat.pending.count) {
     const flags = document.createElement("div");
     flags.className = "boxed-lllllabc-catalog-flags";
+    if (chat.error) flags.append(renderFlag(chat.error, 'danger'));
     if (chat.isFrozen) flags.append(renderFlag("完整备份已暂停更新并保留", "danger"));
     if (chat.isAwaitingConfirmation) flags.append(renderFlag("完整备份待酒馆确认", "warning"));
     if (chat.pending.count) flags.append(renderFlag(`${chat.pending.count} 条改动等待酒馆保存确认`, "warning"));
@@ -287,7 +288,7 @@ function renderCatalogEntry(chat) {
     const actions = document.createElement("footer");
     actions.className = "boxed-lllllabc-catalog-entry-actions";
     const cleanup = createTextButton("fa-broom", "管理清理", () => openCleanupHandler(chat));
-    cleanup.disabled = chat.recordCount === 0;
+    cleanup.disabled = chat.recordCount === 0 || Boolean(chat.error);
     if (cleanup.disabled) cleanup.title = "当前聊天没有可管理的备份记录。";
     actions.append(cleanup);
     entry.append(actions);

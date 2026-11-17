@@ -1,6 +1,7 @@
 import { defaultBackupStorage } from "../storage/service.js";
 import { hashCanonicalChat, stripChatHeader } from "../backup/canonicalize.js";
 import { readBackendChat } from "../verifier/backend-reader.js";
+import { backupBatches } from '../storage/backup-batches.js';
 import { comparePendingWithBackend } from "../verifier/compare.js";
 import { confirmSnapshotPending } from "../snapshots/confirmation.js";
 
@@ -492,7 +493,12 @@ export function createBackendVerifier({
 async function deleteConfirmedPendingRecords(storage, records, shouldDelete, signal) {
   const session = await storage.open();
   try {
-    return await session.deletePendingChangesIfUnchanged(records, { shouldDelete, signal });
+    const deleted = [];
+    for (const rows of backupBatches(records)) {
+      if (signal?.aborted || !shouldDelete()) break;
+      deleted.push(...await session.deletePendingChangesIfUnchanged(rows, { shouldDelete, signal }));
+    }
+    return deleted;
   } finally {
     session.close();
   }

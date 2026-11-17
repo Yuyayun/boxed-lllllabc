@@ -4,6 +4,8 @@ import { createBackupOperations } from "../storage/operations.js";
 import { createSnapshotOperations } from "../storage/snapshot-operations.js";
 import { encodeStorageValue } from "../storage/protocol.js";
 import { ACTIVE_DATASET_KEY, datasetId, datasetStore } from "../storage/dataset-layout.js";
+import { mutationDriver } from './mutation-driver.js';
+import { BACKUP_BUDGET, boundedRecordSize } from '../storage/backup-batches.js';
 
 export function openBackupDatabase() {
   if (!globalThis.indexedDB) {
@@ -63,19 +65,19 @@ export const { beginSnapshot, appendSnapshotMessages, publishSnapshot, getSnapsh
 
 function snapshotDriver(store) {
   return {
-    get: store.get.bind(store), put: store.put.bind(store), delete: store.delete.bind(store), index: store.index.bind(store),
+    ...mutationDriver(store),
     page({ snapshotId, after, limit = 50 }) {
       return new Promise((resolve, reject) => {
         const query = snapshotId ? IDBKeyRange.bound([snapshotId, after], [snapshotId, Infinity], true) : IDBKeyRange.lowerBound(after, true);
-        const read = store.openCursor(query), rows = []; let bytes = 0;
+        const read = store.openCursor(query), rows = []; let bytes = 0, nodes = 100;
         read.onerror = () => reject(read.error);
         read.onsuccess = () => {
           try {
             const cursor = read.result;
             if (!cursor) return resolve(rows);
-            const size = new TextEncoder().encode(JSON.stringify(encodeStorageValue(cursor.value))).byteLength;
-            if (rows.length && (rows.length >= limit || bytes + size > 2 * 1024 * 1024)) return resolve(rows);
-            rows.push(cursor.value); bytes += size; cursor.continue();
+            const size = boundedRecordSize(cursor.value);
+            if (rows.length && (rows.length >= limit || bytes + size.bytes > BACKUP_BUDGET.bytes || nodes + size.nodes > BACKUP_BUDGET.nodes)) return resolve(rows);
+            rows.push(cursor.value); bytes += size.bytes; nodes += size.nodes; cursor.continue();
           } catch (error) { reject(error); }
         };
       });
@@ -100,7 +102,7 @@ function runTransaction(db, storeNames, mode, callback) {
         const active = guarded ? datasetId((await requestToPromise(transaction.objectStore(TRANSFER_STORES.meta).get(ACTIVE_DATASET_KEY)))?.value) : 0;
         const stores = new Map(storeNames.map((name) => {
           const store = transaction.objectStore(datasetStore(name, active));
-          return [name, name === STORES.snapshots || name === STORES.snapshotMessages ? snapshotDriver(store) : store];
+          return [name, name === STORES.snapshots || name === STORES.snapshotMessages ? snapshotDriver(store) : mutationDriver(store)];
         }));
         return callback(stores);
       })

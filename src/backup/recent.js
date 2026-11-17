@@ -2,18 +2,9 @@ import { canonicalizeRecentMessages } from "./canonicalize.js";
 import { classifyTriggers } from "./full.js";
 import { defaultBackupStorage } from "../storage/service.js";
 import { readBackupRecords, writeBackupRecords } from '../storage/backup-batches.js';
-
-export function createBackupStatus(code, shortText, detail = "") {
-  const errorName = detail instanceof Error ? String(detail.name || "") : "";
-  const quotaFailure = code === "db-error" && errorName === "QuotaExceededError";
-  return {
-    code,
-    shortText: quotaFailure ? "空间不足，备份未写入" : shortText,
-    detail: detail instanceof Error ? detail.message : String(detail ?? ""),
-    ...(errorName ? { errorName } : {}),
-    updatedAt: new Date().toISOString(),
-  };
-}
+import { createBackupStatus } from './status.js';
+import { backupFailureStatus } from './failure-status.js';
+export { createBackupStatus } from './status.js';
 
 export async function refreshRecentBackup({ contextReader, settings, reason = "unknown", triggers = [], storage = defaultBackupStorage }) {
   if (!settings.enabled) {
@@ -66,7 +57,7 @@ export async function refreshRecentBackup({ contextReader, settings, reason = "u
     }
   } catch (error) {
     console.error("[boxed-lllllabc] 本地备份失败", error);
-    return createBackupStatus("db-error", "备份不可用", error);
+    return backupFailureStatus(error);
   }
 
   return createBackupStatus("ok", `已备份最近 ${messages.length} 层`);

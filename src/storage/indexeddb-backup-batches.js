@@ -48,6 +48,7 @@ export function createIndexedDbBackupBatches({ openDatabase }) {
               area: () => area, revision: async () => Number(await getMeta('revision') ?? 0),
               async bumpRevision() { await putMeta('revision', await port.revision() + 1); },
               metaGet: getMeta, metaPut: putMeta, metaDelete: key => request(meta.delete(key)),
+              async jobs() { const result = []; await iterate(meta, IDBKeyRange.bound('backup-write:', 'backup-write:\uffff'), cursor => { result.push(cursor.value.value); if (result.length >= 20) return false; }); return result; },
               get: (name, key) => request(store(name).get(key)), put: (name, value) => request(store(name).put(value)),
               async counts(chatKey) { const values = {}; for (const name of BACKUP_STORES) values[name] = await request(store(name).index('by_chat').count(chatKey)); return values; },
               deleteChat: (name, chatKey) => iterate(store(name).index('by_chat'), IDBKeyRange.only(chatKey), cursor => request(cursor.delete())),
@@ -69,7 +70,7 @@ export function createIndexedDbBackupBatches({ openDatabase }) {
               async stageGet(id, n) { return (await request(staged.get([id, 'backup-v1', n])))?.value; },
               stagePut(job, n, value) { const key = job.store === 'pending_changes' ? value.id : [job.chatKey, value.messageIndex]; return request(staged.add({ id: job.id, kind: 'backup-v1', n, store: job.store, key, keyText: JSON.stringify(key), value })); },
               stageCount: id => request(staged.count(stageRange(id))),
-              stageDelete: id => iterate(staged, stageRange(id), cursor => request(cursor.delete())),
+              stageDelete: (id, limit = Infinity) => { let count = 0; return iterate(staged, stageRange(id), async cursor => { if (count++ >= limit) return false; await request(cursor.delete()); }); },
               eachStage: (id, callback) => iterate(staged, stageRange(id), cursor => callback(cursor.value.value)),
               async catalog(after) {
                 const keys = new Set();

@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { createRestoreController } from '../src/controllers/restore-controller.js';
 import { currentSnapshotFingerprint, sameSnapshotContent } from '../src/snapshots/model.js';
 import { readBackupCatalog } from '../src/storage/catalog-reader.js';
+import { executeRestorePlan } from '../src/backup/restore-executor.js';
+import { createFullRestorePlan } from '../src/backup/restore.js';
+import { canonicalizeMessage } from '../src/backup/canonicalize.js';
 
 test('完整恢复延迟到预览；分页失败不应用聊天，也不冒充存储不可用', async () => {
   const current = { ok: true, identity: { chatKey: 'chat' }, chat: [{ mes: 'original' }] };
@@ -20,9 +23,17 @@ test('快照整聊比较和临时指纹支持合计超过 200k 节点，既存�
   const fingerprint = await currentSnapshotFingerprint(current);
   assert.equal(fingerprint.length, 64); assert(sameSnapshotContent(chat, structuredClone(chat)));
   chat[427].mes = 'changed'; assert.notEqual(await currentSnapshotFingerprint(current), fingerprint);
+  assert.equal(sameSnapshotContent([, null], [undefined, null]), false);
 });
 test('目录只收集摘要页，单聊天异常保留其他聊天且阻止危险清理', async () => {
   let pages = 0;
   const catalog = await readBackupCatalog({ capabilities: { boundedBackup: 1 }, getBackupCatalogPage: async () => { pages++; return { items: [{ chatKey: 'bad', displayName: 'bad', error: 'bad record', recordCount: 0, storageBytes: 0, pending: { count: 0 } }, { chatKey: 'good', displayName: 'good', recordCount: 2, storageBytes: 100, pending: { count: 0 } }], after: null, revision: 1 }; }, getBackupCatalogData: () => { throw new Error('raw read'); } });
   assert.equal(pages, 1); assert.equal(catalog.chatCount, 2); assert.equal(catalog.invalidRecordCount, 1);
+});
+test('恢复保护写入期间来源变化，不覆盖用户的新内容', async () => {
+  const current = { ok: true, identity: { chatKey: 'chat' }, chat: [{ mes: 'before' }] };
+  const plan = createFullRestorePlan({ chat: current.chat, chatKey: 'chat', fullMessages: [canonicalizeMessage({ mes: 'backup' }, 0)], pending: [] });
+  let rendered = false, writes = 0;
+  const result = await executeRestorePlan({ plan, readCurrent: () => current, readPending: async () => [], replacePending: async () => { if (++writes === 1) current.chat[0].mes = 'user changed'; }, render: async () => { rendered = true; }, save: async () => {} });
+  assert(!result.ok); assert(!rendered); assert.equal(current.chat[0].mes, 'user changed');
 });
