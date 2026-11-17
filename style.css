@@ -486,11 +486,13 @@
   overflow: auto;
 }
 
+#boxed-lllllabc-settings-panel-body,
 #boxed-lllllabc-status-dialog-body {
   align-content: start;
   grid-auto-rows: max-content;
 }
 
+#boxed-lllllabc-settings-panel-body .boxed-lllllabc-primary-actions,
 #boxed-lllllabc-status-dialog-body .boxed-lllllabc-primary-actions {
   align-content: start;
 }
@@ -1789,6 +1791,7 @@
     gap: 3px;
   }
 
+  #boxed-lllllabc-settings-panel-body .boxed-lllllabc-primary-actions-title > span,
   #boxed-lllllabc-status-dialog-body .boxed-lllllabc-primary-actions-title > span {
     flex: none;
   }
