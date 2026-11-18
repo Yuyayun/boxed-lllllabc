@@ -11,7 +11,7 @@ import { renderCurrentChatPanel } from "../ui/current-chat-panel.js";
 import { openFrozenBackupDialog } from "../ui/frozen-backup-dialog.js";
 import { createCurrentChatStorageText } from "../ui/storage-status.js";
 import { readBackupRecords, writeBackupRecords } from '../storage/backup-batches.js';
-import { storedChatSummary } from '../storage/backup-catalog-summary.js';
+import { readBackupCatalog } from '../storage/catalog-reader.js';
 import { buildResolvedFullBackupMeta } from '../backup/frozen-resolution.js';
 import { backupFailureStatus } from '../backup/failure-status.js';
 import { stableText } from '../storage/value-digest.js';
@@ -169,7 +169,7 @@ export function createPanelController({
           meta: panelMeta,
           summary,
         });
-        const cleanupChat = summary ? storedChatSummary(current.identity.chatKey, panelMeta, Object.fromEntries(Object.entries(summary.counts).map(([store, count]) => [store, { count, bytes: 0, firstIndex: store === 'full_messages' && count ? 0 : null, lastIndex: store === 'full_messages' && count ? count - 1 : null }])), summary.revision) : buildCurrentCleanupChat({
+        const cleanupChat = summary ? null : buildCurrentCleanupChat({
           meta: panelMeta,
           messages,
           pending,
@@ -177,6 +177,9 @@ export function createPanelController({
           fullMessages,
           historicalChanges,
         });
+        const hasCleanup = summary
+          ? Object.values(summary.counts).some(count => count > 0)
+          : Boolean(cleanupChat);
         const frozenResolution = createFrozenFullBackupResolutionPlan({
           current,
           meta: panelMeta,
@@ -210,13 +213,15 @@ export function createPanelController({
             }
             : {},
           management: {
-            disabledReason: cleanupChat ? "" : "当前聊天还没有可管理的备份。",
+            disabledReason: hasCleanup ? "" : "当前聊天还没有可管理的备份。",
             storageText: summary ? '' : createCurrentChatStorageText(
               getStorageSnapshot(),
               cleanupChat?.storageBytes ?? 0,
             ),
-            onOpen: cleanupChat && typeof openBackupCleanup === "function"
-              ? () => openBackupCleanup(cleanupChat)
+            onOpen: hasCleanup && typeof openBackupCleanup === "function"
+              ? () => summary
+                ? openCurrentBackupCleanup(current.identity.chatKey)
+                : openBackupCleanup(cleanupChat)
               : null,
           },
           onVerify: async () => {
@@ -260,6 +265,27 @@ export function createPanelController({
         settings: getSettings(),
       });
     }
+  }
+
+  async function openCurrentBackupCleanup(chatKey) {
+    let chat;
+    try {
+      const session = await storage.open();
+      try {
+        const catalog = await readBackupCatalog(session);
+        chat = catalog.chats.find(chat => chat.chatKey === chatKey);
+      } finally {
+        session.close();
+      }
+      if (!chat) {
+        throw new Error("当前聊天已没有可管理的备份，请刷新后重试。");
+      }
+    } catch (error) {
+      setStatus(backupFailureStatus(error, '读取'));
+      await refreshVisiblePanel();
+      return;
+    }
+    return openBackupCleanup(chat);
   }
 
   async function refreshVisiblePanel() {
