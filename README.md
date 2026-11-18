@@ -2,17 +2,19 @@
 
 SillyTavern 聊天保存状态与备份扩展，帮助你查看备份、找回丢失或误改的聊天内容。
 
-**当前分支版本：1.0.2，尚未发布。** 最近正式版为 1.0.1，[正式版下载](https://github.com/Yuyayun/boxed-lllllabc/releases/tag/v1.0.1)。本分支修复超大聊天备份链路。
+**当前正式版：1.0.2** · [正式版下载](https://github.com/Yuyayun/boxed-lllllabc/releases/tag/v1.0.2)。修复超大聊天备份链路、保存状态核对及当前聊天清理摘要，并改善手机端布局和日志时间显示。
 
 只安装前端就能使用浏览器本地备份（IndexedDB）。[服务器插件](https://github.com/Yuyayun/boxed-lllllabc-server)是可选组件；安装后仍由你决定是否切换位置，不会自动迁移，也不会同步两个位置的数据。
 
 ## 安装与更新
 
-在酒馆的扩展安装入口输入本仓库地址，即可安装 main 上的正式版。也可以从正式发布页面下载源码 ZIP，解压后将前端目录命名为 `boxed-lllllabc`，放到酒馆的：
+在酒馆的扩展安装入口输入本仓库地址，即可安装 main 上的正式版。也可以从正式发布页面下载 `boxed-lllllabc-v1.0.2.zip`，解压后将其中的 `boxed-lllllabc` 目录放到酒馆的：
 
 ```text
 public/scripts/extensions/third-party/boxed-lllllabc
 ```
+
+Release 同时提供 SHA256 校验文件及 GitHub 自动生成的完整源码 ZIP/TAR；使用源码 ZIP 安装时，需将解压目录重命名为 `boxed-lllllabc`。
 
 也可以在酒馆根目录使用 Git 安装正式版：
 
