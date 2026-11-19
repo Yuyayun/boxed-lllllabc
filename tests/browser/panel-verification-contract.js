@@ -39,7 +39,7 @@ export async function runPanelVerificationContract() {
       assert(!button.isConnected && verifyButton() && !verifyButton().disabled, '完成核对或读取失败后应刷新原面板并恢复可操作状态');
       if (readFailure) {
         assert(calls.length === 0, '摘要读取失败时不应猜测核对路径');
-        assert(latestStatus.code === 'backup-read-failed', '摘要读取失败应保留读取失败分类');
+        assert(latestStatus.code === 'checking', '摘要读取失败不得覆盖聊天保存状态');
         assert(document.querySelector('.boxed-lllllabc-panel-summary').textContent.includes('摘要读取失败，请重试'), '原面板应显示具体失败原因');
       } else {
         assert(pendingReads === (clickCount ? 1 : 0) && snapshotReads === (clickCount ? 0 : 1), `核对路径错误：bounded=${bounded}, pending=${initialCount}->${clickCount}, calls=${JSON.stringify({ pendingReads, snapshotReads })}`);

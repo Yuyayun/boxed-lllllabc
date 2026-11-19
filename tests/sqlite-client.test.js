@@ -9,6 +9,17 @@ import { createCatalogController } from "../src/controllers/catalog-controller.j
 
 const response = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
 
+test('旧服务器缺少备份完成核对能力时，保留带补写目标的 pending 并提示更新', async () => {
+  let operations = 0;
+  const adapter = createSqliteStorage({ fetchImpl: async url => {
+    if (url.endsWith('/status')) return response({ ok: true, protocol: STORAGE_PROTOCOL, capabilities: { boundedBackup: 1 } });
+    operations++; return response({ ok: true, protocol: STORAGE_PROTOCOL, value: encodeStorageValue([]) });
+  } });
+  const session = await adapter.open();
+  await assert.rejects(session.deletePendingChangesIfUnchanged([{ id: 'chat:0', backupTargets: ['full_messages'] }]), { code: 'backup-upgrade-required' });
+  assert.equal(operations, 0); session.close();
+});
+
 for (const phase of ["fetch", "body"]) {
   test(`SQLite 批量请求 ${phase} 阶段实际超时中断保留未知结果`, async () => {
     let submitted = 0, abortError;

@@ -6,6 +6,8 @@ import { encodeStorageValue } from "../storage/protocol.js";
 import { ACTIVE_DATASET_KEY, datasetId, datasetStore } from "../storage/dataset-layout.js";
 import { mutationDriver } from './mutation-driver.js';
 import { BACKUP_BUDGET, boundedRecordSize } from '../storage/backup-batches.js';
+import { BACKUP_STORES } from '../storage/backup-batches.js';
+import { backupVersionKey } from '../storage/backup-versions.js';
 
 export function openBackupDatabase() {
   if (!globalThis.indexedDB) {
@@ -85,7 +87,7 @@ function snapshotDriver(store) {
   };
 }
 
-function runTransaction(db, storeNames, mode, callback) {
+function runTransaction(db, storeNames, mode, callback, { writeStores = storeNames } = {}) {
   return new Promise((resolve, reject) => {
     const guarded = db.objectStoreNames?.contains(TRANSFER_STORES.meta);
     const physicalNames = storeNames.flatMap(name => [name, datasetStore(name, 1)].filter(physical => db.objectStoreNames?.contains(physical) ?? physical === name));
@@ -111,6 +113,10 @@ function runTransaction(db, storeNames, mode, callback) {
           const meta = transaction.objectStore(TRANSFER_STORES.meta);
           const revision = (await requestToPromise(meta.get("revision")))?.value ?? 0;
           await requestToPromise(meta.put({ key: "revision", value: revision + 1 }));
+          for (const name of writeStores.filter(name => BACKUP_STORES.includes(name))) {
+            const key = backupVersionKey(name), previous = (await requestToPromise(meta.get(key)))?.value ?? 0;
+            await requestToPromise(meta.put({ key, value: previous + 1 }));
+          }
         }
         return result;
       })

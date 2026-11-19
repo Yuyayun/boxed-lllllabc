@@ -38,6 +38,7 @@ export function ensureStatusLine({ onOpenPanel, getDisplayMode, getMessageCenter
 }
 
 export function updateStatusLine(status) {
+  if (status?.code === 'backup-read-failed') return;
   latestStatus = status;
   ensureStatusLine();
 }
@@ -252,7 +253,7 @@ function getVisualStatus(code) {
     return "saved";
   }
 
-  if (code === "failed" || code === "verify-unavailable" || code === "db-error" || code === "full-frozen" || code === 'backup-update-failed' || code === 'backup-read-failed') {
+  if (code === "failed" || code === "verify-unavailable" || code === "db-error" || code === "full-frozen" || code === 'backup-update-failed') {
     return "failed";
   }
 

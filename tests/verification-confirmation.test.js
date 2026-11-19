@@ -22,7 +22,7 @@ function fixture(path, confirmFullBackup) {
     readBackend: async () => ({ ok: true, chat: [{ chat_metadata: {} }, ...structuredClone(chat)] }),
     retryDelays: [],
   });
-  return { verifier, statuses, meta, get latest() { return latest; }, get confirmations() { return confirmations; }, get refreshes() { return refreshes; },
+  return { verifier, statuses, meta, get pending() { return pending; }, get latest() { return latest; }, get confirmations() { return confirmations; }, get refreshes() { return refreshes; },
     run: () => path === 'pending' ? verifier.verifyBackendNow({ chatKey: 'chat' }) : verifier.verifyBackendSnapshotNow({ chatKey: 'chat', expectedChatHash: hashCanonicalChat(chat) }) };
 }
 
@@ -37,6 +37,7 @@ for (const path of ['pending', 'snapshot']) {
       assert.equal(status, failure); assert.equal(run.latest, failure);
       assert.equal(run.statuses.some(value => value.code === 'saved'), false);
       assert.equal(run.meta.includes('saved'), false);
+      if (path === 'pending') assert.equal(run.pending.length, 1, '完整备份未完成不能先删 pending');
     });
   }
   test(`${path} 核对完整备份确认成功时仍发布 saved`, async () => {
@@ -58,3 +59,16 @@ for (const path of ['pending', 'snapshot']) {
     assert.equal(run.statuses.some(status => status.code === 'backup-update-failed'), false);
   });
 }
+
+test('自动核对读取 pending 失败时有限重试，保留原状态且不产生未处理拒绝', async t => {
+  t.mock.method(console, 'warn', () => {});
+  const callbacks = []; let reads = 0, next = 0, latest = { code: 'saved' };
+  const verifier = createBackendVerifier({
+    getSettings: () => ({ enabled: true }), getContextReader: () => ({ readCurrentChat: () => ({ ok: true, identity: { chatKey: 'chat' }, chat: [] }) }),
+    getLatestStatus: () => latest, setStatus: status => { latest = status; }, readCurrentPending: async () => { reads++; throw new Error('read unavailable'); },
+    retryDelays: [1, 2], setTimer: callback => { callbacks.push(callback); return ++next; }, clearTimer() {},
+  });
+  verifier.scheduleBackendVerification('chat', 0, 0);
+  for (let n = 0; callbacks.length && n < 5; n++) await callbacks.shift()();
+  assert.equal(reads, 3); assert.equal(callbacks.length, 0); assert.equal(latest.code, 'saved');
+});

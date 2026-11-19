@@ -1,6 +1,6 @@
 {
   "name": "boxed-lllllabc",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "SillyTavern 聊天本地备份扩展。",
   "homepage": "https://github.com/Yuyayun/boxed-lllllabc",
   "repository": {
@@ -22,7 +22,8 @@
     "styles/"
   ],
   "scripts": {
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "test:storage-safety": "node --test --test-concurrency=1 tests/diagnostics/historical-restore-race.mjs"
   },
   "private": true
 }

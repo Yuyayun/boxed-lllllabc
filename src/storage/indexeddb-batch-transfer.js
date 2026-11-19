@@ -42,7 +42,7 @@ export function createIndexedDbBatchTransfer({ openDatabase = openBackupDatabase
               });
             },
             active: () => get(ACTIVE_DATASET_KEY), revision: async () => await get("revision") ?? 0,
-            activePut: value => put(ACTIVE_DATASET_KEY, value), revisionPut: value => put("revision", value),
+            activePut: async value => { await put(ACTIVE_DATASET_KEY, value); await put('backup-scope-epoch', (await get('backup-scope-epoch') ?? 0) + 1); }, revisionPut: value => put("revision", value),
             lockGet: () => get("lock"), lockPut: id => put("lock", id),
             lockDelete: () => request(meta.delete("lock")),
             taskGet: id => request(meta.get(id)), taskPut: state => request(meta.put({ ...state, key: state.id })),

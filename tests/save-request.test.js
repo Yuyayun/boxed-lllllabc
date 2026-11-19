@@ -50,6 +50,15 @@ test("重新保存计划拒绝确认期间发生的聊天变化", () => {
   assert.match(validation.reason, /聊天内容已经变化/);
 });
 
+test('确认窗口打开后后台核销 pending，聊天未变化时仍可请求保存；新增或修改记录仍拒绝', () => {
+  const chat = makeChat(), first = makePending(0, 'first'), second = makePending(1, 'second');
+  const current = { ok: true, chat, identity: { chatKey } }, plan = createSaveRequestPlan({ chat, chatKey, pending: [first, second] });
+  assert.equal(validateSaveRequestPlan({ plan, current, pending: [first] }).ok, true);
+  assert.equal(validateSaveRequestPlan({ plan, current, pending: [] }).ok, true);
+  assert.equal(validateSaveRequestPlan({ plan, current, pending: [makePending(0, 'changed')] }).ok, false);
+  assert.equal(validateSaveRequestPlan({ plan, current, pending: [first, second, makePending(2, 'new')] }).ok, false);
+});
+
 test("重新请求酒馆保存只调用一次 saveChat 并等待后端核对", async () => {
   const chat = makeChat();
   const pending = [makePending(1, "第二层")];

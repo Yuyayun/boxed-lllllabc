@@ -18,14 +18,15 @@ import { buildVisibleChatSummary } from "../ui/presentation.js";
 import { openRestoreDialog } from "../ui/restore-dialog.js";
 import { openRecoveryCenterDialog } from "../ui/recovery-center-dialog.js";
 import { openSaveRequestDialog } from "../ui/save-request-dialog.js";
-import { readBackupRecords, writeBackupRecords } from '../storage/backup-batches.js';
+import { readBackupRecords, readBackupBundle, writeBackupRecords } from '../storage/backup-batches.js';
 import { backupFailureStatus } from '../backup/failure-status.js';
+import { protectPendingRecord } from '../backup/pending-protection.js';
 
 export function createRestoreController({
   storage = defaultBackupStorage,
   runGuard = (operation) => operation(),
   getContextReader,
-  getSettings,
+  getSettings = () => ({}),
   eventTypes,
   readCurrentPending,
   setStatus,
@@ -37,6 +38,7 @@ export function createRestoreController({
   refreshHistoricalBackup,
   saveRequestTimeoutMs = SAVE_REQUEST_TIMEOUT_MS,
   waitForSave = waitForSaveRequest,
+  openSaveDialog = openSaveRequestDialog,
 }) {
   function createRestoreUiState({ current, messages, fullMessages, historicalChanges, pending, meta, summary }) {
     if (summary) {
@@ -47,17 +49,14 @@ export function createRestoreController({
           const fresh = getContextReader().readCurrentChat();
           if (!fresh.ok || fresh.identity.chatKey !== current.identity.chatKey || storage.getMode?.() !== mode) throw new Error('聊天或备份位置已经变化，请重新打开面板。');
           session = await storage.open();
-          const state = await session.getBackupSummary(fresh.identity.chatKey);
           const full = action === 'onPreviewFull' || action === 'onOpenRecovery';
           const historical = action === 'onPreviewHistorical' || action === 'onOpenRecovery';
-          const options = { summary: state };
-          const loadedPending = await readBackupRecords(session, fresh.identity.chatKey, 'pending_changes', options);
-          const loadedFull = full ? await readBackupRecords(session, fresh.identity.chatKey, 'full_messages', options) : [];
-          const loadedHistorical = historical ? await readBackupRecords(session, fresh.identity.chatKey, 'historical_changes', options) : [];
-          const loadedRecent = await readBackupRecords(session, fresh.identity.chatKey, 'recent_messages', options);
+          const stores = ['pending_changes', ...(full ? ['full_messages'] : []), ...(historical ? ['historical_changes'] : []), 'recent_messages'];
+          const { records, summary: state } = await readBackupBundle(session, fresh.identity.chatKey, stores);
+          const loadedPending = records.pending_changes, loadedFull = records.full_messages ?? [], loadedHistorical = records.historical_changes ?? [], loadedRecent = records.recent_messages;
           const ui = createRestoreUiState({ current: fresh, messages: loadedRecent, fullMessages: loadedFull, historicalChanges: loadedHistorical, pending: loadedPending, meta: state.meta ?? meta });
           return ui[action]?.(argument);
-        } catch (error) { const status = backupFailureStatus(error, '读取'); setStatus(status); globalThis.toastr?.error?.(status.detail, '箱装辣白菜'); return { ok: false, reason: status.detail }; }
+        } catch (error) { const status = backupFailureStatus(error, '读取'); if (status.code === 'db-error') setStatus(status); globalThis.toastr?.error?.(status.detail, '箱装辣白菜'); return { ok: false, reason: status.detail }; }
         finally { session?.close?.(); }
       };
       return { fullPlan: { totalCount: summary.counts.full_messages }, recentOptions: createRecentRestoreOptions({ chat: current.chat, recent: messages }), disabledReason: getSettings().enabled ? '' : '请先启用备份，再执行恢复或请求酒馆保存。',
@@ -184,7 +183,7 @@ export function createRestoreController({
 
   function showSaveRequestDialog({ plan, pending, meta }) {
     const chatName = buildVisibleChatSummary(meta)[0]?.value || "当前聊天";
-    openSaveRequestDialog({
+    openSaveDialog({
       plan,
       chatName,
       pending,
@@ -223,7 +222,7 @@ export function createRestoreController({
       writePending: async (records) => {
         const session = await storage.open();
         try {
-          await writeBackupRecords(session, { chatKey: plan.chatKey, store: 'pending_changes', rows: records });
+          await writeBackupRecords(session, { chatKey: plan.chatKey, store: 'pending_changes', rows: records.map(record => protectPendingRecord(record, getSettings(), contextReader.readCurrentChat().chat.length)) });
         } finally {
           session.close();
         }
@@ -231,7 +230,7 @@ export function createRestoreController({
       replacePending: async (records) => {
         const session = await storage.open();
         try {
-          const receipt = await writeBackupRecords(session, { chatKey: plan.chatKey, store: 'pending_changes', rows: records, replace: true, summary: pendingSummary });
+          const receipt = await writeBackupRecords(session, { chatKey: plan.chatKey, store: 'pending_changes', rows: records.map(record => protectPendingRecord(record, getSettings(), record.chatLength ?? contextReader.readCurrentChat().chat.length)), replace: true, summary: pendingSummary });
           if (receipt?.committedRevision !== undefined) pendingSummary = { ...pendingSummary, revision: receipt.committedRevision };
         } finally {
           session.close();

@@ -86,6 +86,7 @@ export function createSqliteStorage({ fetchImpl = globalThis.fetch, getRequestHe
           if (closed) throw new Error("存储会话已经关闭。");
           let signal;
           if (operation === "deletePendingChangesIfUnchanged") {
+            if (!health.capabilities?.pendingBackupProof && args[0]?.some(record => record.backupTargets?.length)) throw Object.assign(new Error('服务器备份插件需要更新，才能核对备份完成后清除保护记录。'), { code: 'backup-upgrade-required' });
             const options = args[1] ?? {};
             if (options.shouldDelete && !options.shouldDelete()) return [];
             signal = options.signal;

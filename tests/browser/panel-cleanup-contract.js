@@ -143,7 +143,9 @@ export async function runPanelCleanupContract() {
   for (const failure of ['read-error', 'missing', 'revision']) {
     const run = await fixture('settings', failure);
     run.button.click();
-    await waitFor(() => run.latest.code === 'backup-read-failed' && !run.button.isConnected);
+    await waitFor(() => !run.button.isConnected);
+    assert(run.latest.code === 'saved', '管理入口读取失败不得覆盖聊天已保存状态');
+    assert(document.querySelector('.boxed-lllllabc-panel-summary').textContent.includes('备份读取失败'), '当前面板应单独显示读取失败');
     assert(run.captures.length === 0, '目录异常或当前聊天已消失时，不能打开伪造清理摘要');
     assert(!document.querySelector('#boxed-lllllabc-cleanup-dialog'), '读取失败不应打开清理对话框');
     assert(!document.querySelector('.boxed-lllllabc-current-cleanup').disabled, '读取失败后应恢复入口');

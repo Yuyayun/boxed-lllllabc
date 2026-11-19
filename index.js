@@ -104,6 +104,7 @@ const pageReloadScheduler = createPageReloadScheduler({
 });
 
 function setStatus(status) {
+  if (status?.code === 'backup-read-failed') return;
   latestStatus = status;
   $("#boxed-lllllabc-settings-state").text(status.shortText);
   updateStatusLine(status);
@@ -145,6 +146,9 @@ function initializeControllers() {
     updateBackendMeta: (...args) => backupCoordinator.updateBackendMeta(...args),
     createDisplayStatus: (...args) => backupCoordinator.createDisplayStatus(...args),
     confirmFullBackup: (...args) => backupCoordinator.confirmFullBackupAfterBackendVerification(...args),
+    ensurePendingBackups: (...args) => backupCoordinator.ensurePendingBackups(...args),
+    onPendingBackupsConfirmed: (...args) => backupCoordinator.onPendingBackupsConfirmed(...args),
+    hasBackupProblem: (...args) => backupCoordinator.hasBackupProblem(...args),
     needsFullBackupConfirmation: (...args) => backupCoordinator.needsFullBackupConfirmation(...args),
     retryDelays: verifyRetryDelays,
   });

@@ -32,7 +32,18 @@ export function validateSaveRequestPlan({ plan, current, pending }) {
   }
 
   const safePending = Array.isArray(pending) ? pending : [];
-  if (safePending.length !== plan.pendingCount || fingerprintPending(safePending) !== plan.pendingFingerprint) {
+  const fingerprint = fingerprintPending(safePending);
+  let onlyRemoved = false;
+  if (safePending.length < plan.pendingCount) {
+    try {
+      const previous = new Map(JSON.parse(plan.pendingFingerprint).map(record => [record.id, JSON.stringify(record)]));
+      onlyRemoved = JSON.parse(fingerprint).every(record => previous.get(record.id) === JSON.stringify(record));
+    } catch { /* Invalid plans still require a fresh confirmation. */ }
+  }
+  // Requesting native save does not replace backups or delete pending. A
+  // background check may have safely removed some records since the dialog
+  // opened; unchanged remaining records need no new user confirmation.
+  if (!onlyRemoved && (safePending.length !== plan.pendingCount || fingerprint !== plan.pendingFingerprint)) {
     return {
       ok: false,
       reason: "未保存变更已经变化，请重新确认后再请求酒馆保存。",

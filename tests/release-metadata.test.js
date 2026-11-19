@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { parseVersionChangelog } from '../src/ui/extension-info.js';
 
 const ROOT = new URL("../", import.meta.url);
 const REPOSITORY_URL = "https://github.com/Yuyayun/boxed-lllllabc";
@@ -16,12 +17,18 @@ test("发布元数据指向真实 GitHub 仓库", async () => {
   const changelog = await readProjectFile("CHANGELOG.md");
 
   assert.equal(manifest.homePage, REPOSITORY_URL);
-  assert.equal(manifest.version, "1.0.2");
+  assert.equal(manifest.version, "1.0.3");
   assert.equal(packageJson.version, manifest.version);
   assert.equal(packageJson.homepage, REPOSITORY_URL);
   assert.equal(packageJson.repository.url, `git+${REPOSITORY_URL}.git`);
   assert.ok((await readProjectFile("settings.html")).includes(`id="boxed-lllllabc-version">Ver ${manifest.version}</`));
   assert.match(changelog, new RegExp(`^##\\s+${manifest.version.replaceAll(".", "\\.")}(?:\\s|$)`, "m"));
+  const announcement = parseVersionChangelog(changelog, manifest.version);
+  assert.equal(announcement?.date, '2026-11-20');
+  const announcementText = announcement.blocks.flatMap(block => block.items ?? [block.text]).join('\n');
+  assert.match(announcementText, /旧楼层修改/);
+  assert.match(announcementText, /前端扩展与服务器插件一并更新至 1\.0\.3/);
+  assert.match(await readProjectFile('README.md'), /当前分支版本：1\.0\.3/);
 });
 
 test("发布元数据注册安装与更新后的自动刷新钩子", async () => {

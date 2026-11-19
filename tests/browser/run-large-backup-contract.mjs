@@ -91,6 +91,8 @@ try {
     assert([3000, 10000].includes(reopenedCount), 'closing the page published a partial IDB transaction');
     const snapshotUiCases = await reopened.evaluate(async () => (await import('/tests/browser/snapshot-ui-contract.js')).runSnapshotUiContract());
     assert.equal(snapshotUiCases.length, 12);
-    console.log(JSON.stringify({ mobile, ...result, interruptedCommitCount: reopenedCount, atomicClose: true, snapshotUiCases: snapshotUiCases.length, panelVerificationCases: panelVerificationCases.length, panelCleanupCases: panelCleanupCases.length })); await context.close();
+    const historicalRepairCases = await reopened.evaluate(async () => (await import('/tests/browser/historical-repair-contract.js')).runHistoricalRepairContract());
+    assert.equal(historicalRepairCases.length, 7);
+    console.log(JSON.stringify({ mobile, ...result, interruptedCommitCount: reopenedCount, atomicClose: true, snapshotUiCases: snapshotUiCases.length, panelVerificationCases: panelVerificationCases.length, panelCleanupCases: panelCleanupCases.length, historicalRepairCases })); await context.close();
   }
 } finally { await browser.close(); await new Promise(resolve => server.close(resolve)); }

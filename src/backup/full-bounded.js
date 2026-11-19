@@ -4,7 +4,7 @@ import { readBackupRecords, writeBackupRecords, backupFailure } from '../storage
 import { stableText } from '../storage/value-digest.js';
 
 const contentEvents = new Set(['message_sent','message_received','message_edited','message_updated','message_swiped','message_swipe_deleted','message_reasoning_edited','message_reasoning_deleted','generation_ended','generation_stopped']);
-export async function refreshBoundedFullBackup({ session, current, triggers, reason, backendConfirmed, views, readCurrent, epoch = () => 0 }) {
+export async function refreshBoundedFullBackup({ session, current, triggers, reason, backendConfirmed, sourceChatHash = null, views, readCurrent, epoch = () => 0 }) {
   const key = current.identity.chatKey, summary = await session.getBackupSummary(key), meta = summary.meta ?? {}, count = summary.counts.full_messages;
   const info = classifyTriggers(triggers, current.chat.length), view = views.get(key);
   if (info.onlyIgnoredFirstMessage) return null;
@@ -24,7 +24,7 @@ export async function refreshBoundedFullBackup({ session, current, triggers, rea
     // Only reconciliation/replacement needs a complete stable source view.
     source = structuredClone(current.chat);
     if (count) {
-      const old = await readBackupRecords(session, key, 'full_messages', { hashesOnly: true, summary });
+      const old = await readBackupRecords(session, key, 'full_messages', { hashesOnly: true, summary, retries: 0 });
       const live = readCurrent();
       if (!unchanged() || !source.every((row, index) => stableText(row) === stableText(live.chat[index]))) throw backupFailure('来源聊天在核对期间发生变化，已有备份已保留。', 'backup-source-changed');
       if (old.some((row, index) => row.messageIndex !== index)) throw backupFailure('完整备份楼层不连续，已有备份已保留。');
@@ -47,9 +47,9 @@ export async function refreshBoundedFullBackup({ session, current, triggers, rea
     } else replace = true;
   }
   if (!unchanged()) throw backupFailure('来源聊天已经变化，已有备份已保留。', 'backup-source-changed');
-  if (!source.length && !replace) { views.set(key, { count, at: meta.fullBackupAt }); return null; }
+  if (!source.length && !replace && !sourceChatHash) { views.set(key, { count, at: meta.fullBackupAt }); return null; }
   const now = new Date().toISOString();
-  const patch = { fullBackupAt: now, fullBackupMessageCount: length, fullBackupFirstIndex: length ? 0 : null, fullBackupLastIndex: length ? length - 1 : null, fullBackupLastReason: reason, fullBackupState: 'active', fullBackupIncident: null, fullBackupPendingMessageCount: null };
+  const patch = { fullBackupAt: now, fullBackupMessageCount: length, fullBackupFirstIndex: length ? 0 : null, fullBackupLastIndex: length ? length - 1 : null, fullBackupLastReason: reason, fullBackupState: 'active', fullBackupIncident: null, fullBackupPendingMessageCount: null, fullBackupChatHash: sourceChatHash };
   await writeBackupRecords(session, {
     chatKey: key, store: 'full_messages', rows: source, mapRow: replace ? (raw, index) => canonicalizeMessage(raw, index, now) : item => canonicalizeMessage(item.raw, item.index, now), replace, meta: patch, summary,
     sourceUnchanged: unchanged,

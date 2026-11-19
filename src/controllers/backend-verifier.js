@@ -17,6 +17,9 @@ export function createBackendVerifier({
   updateBackendMeta,
   createDisplayStatus,
   confirmFullBackup = async () => null,
+  ensurePendingBackups = async () => null,
+  onPendingBackupsConfirmed = async () => {},
+  hasBackupProblem = () => false,
   needsFullBackupConfirmation = async () => false,
   readBackend = readBackendChat,
   deleteConfirmedPending = (records, shouldDelete, signal) => deleteConfirmedPendingRecords(storage, records, shouldDelete, signal),
@@ -65,10 +68,13 @@ export function createBackendVerifier({
       if (!isCurrentRun(runId)) {
         return;
       }
-      if (type === "snapshot") {
-        await runSnapshotVerification({ chatKey, expectedChatHash, retryIndex, runId });
-      } else {
-        await runPendingVerification({ chatKey, retryIndex, runId });
+      try {
+        if (type === "snapshot") await runSnapshotVerification({ chatKey, expectedChatHash, retryIndex, runId });
+        else await runPendingVerification({ chatKey, retryIndex, runId });
+      } catch (error) {
+        if (!isCurrentRun(runId) || isAbortError(error)) return;
+        console.warn('[boxed-lllllabc] 核对前读取保护记录失败，已保留原保存状态和保护记录', error);
+        if (retryIndex < retryDelays.length) scheduleVerificationForRun({ type, chatKey, expectedChatHash, retryIndex: retryIndex + 1, delayMs: retryDelays[retryIndex], runId });
       }
     }, delayMs);
   }
@@ -137,6 +143,12 @@ export function createBackendVerifier({
       return latestStatus();
     }
     if (!pending.length) {
+      if (hasBackupProblem(chatKey)) {
+        const repair = await enqueueEffect(runId, () => ensurePendingBackups({ current, records: [], shouldContinue: () => isCurrentRun(runId) }));
+        if (!repair.applied || !isCurrentRun(runId)) return latestStatus();
+        if (repair.value?.code) return publishBackupFailure(runId, chatKey, retryIndex, repair.value);
+        return runSnapshotVerification({ chatKey, expectedChatHash: hashCanonicalChat(current.chat), retryIndex, runId });
+      }
       const needsConfirmation = await needsFullBackupConfirmation(chatKey);
       if (!isCurrentRun(runId)) {
         return latestStatus();
@@ -187,11 +199,13 @@ export function createBackendVerifier({
       if (!isCurrentRun(runId)) {
         return latestStatus();
       }
-      const latestCurrent = needsFullConfirmation ? getContextReader().readCurrentChat() : current;
-      if (needsFullConfirmation && (!latestCurrent.ok || latestCurrent.identity.chatKey !== chatKey)) {
+      const needsStructuralProof = pending.some(record => !Number.isInteger(record.messageIndex) && record.backupTargets?.includes('full_messages'));
+      const fullComparison = needsFullConfirmation || needsStructuralProof;
+      const latestCurrent = fullComparison ? getContextReader().readCurrentChat() : current;
+      if (fullComparison && (!latestCurrent.ok || latestCurrent.identity.chatKey !== chatKey)) {
         return latestStatus();
       }
-      const backendMatchesCurrent = needsFullConfirmation
+      const backendMatchesCurrent = fullComparison
         && hashCanonicalChat(stripChatHeader(backend.chat)) === hashCanonicalChat(latestCurrent.chat);
       const snapshotConfirmed = await confirmSnapshotPending(pending, backend.chat, getContextReader().readCurrentChat());
       if (!isCurrentRun(runId)) return latestStatus();
@@ -200,7 +214,15 @@ export function createBackendVerifier({
         ? pending.map((record) => record?.id).filter(Boolean)
         : comparison.confirmedIds);
       for (const id of snapshotConfirmed) confirmedIds.add(id);
-      const confirmedRecords = pending.filter((record) => confirmedIds.has(record?.id) && (!record.snapshotSaveProof || snapshotConfirmed.has(record.id)));
+      const confirmedRecords = pending.filter((record) => confirmedIds.has(record?.id) && (!record.snapshotSaveProof || snapshotConfirmed.has(record.id)))
+        .map(record => backendMatchesCurrent && !Number.isInteger(record.messageIndex) ? { ...record, verifiedFullChatHash: hashCanonicalChat(latestCurrent.chat) } : record);
+      let fullConfirmed = false;
+      if (fullComparison && backendMatchesCurrent) {
+        const confirmation = await enqueueEffect(runId, () => confirmFullBackup({ current: latestCurrent }));
+        if (!confirmation.applied || !isCurrentRun(runId)) return latestStatus();
+        if (confirmation.value?.code) return publishBackupFailure(runId, chatKey, retryIndex, confirmation.value);
+        fullConfirmed = true;
+      }
       if (confirmedRecords.length) {
         const deletion = await enqueueEffect(
           runId,
@@ -209,6 +231,15 @@ export function createBackendVerifier({
         if (!deletion.applied || !isCurrentRun(runId)) {
           return latestStatus();
         }
+        if (Array.isArray(deletion.value) && deletion.value.length < confirmedRecords.length) {
+          const deletedIds = new Set(deletion.value);
+          const retained = confirmedRecords.filter(record => !deletedIds.has(record.id));
+          const repair = await enqueueEffect(runId, () => ensurePendingBackups({ current: latestCurrent, records: retained, shouldContinue: () => isCurrentRun(runId) }));
+          if (!repair.applied || !isCurrentRun(runId)) return latestStatus();
+          if (repair.value?.code) return publishBackupFailure(runId, chatKey, retryIndex, repair.value);
+          await enqueueEffect(runId, () => deleteConfirmedPending(retained, () => isCurrentRun(runId), operationController?.signal));
+          if (!isCurrentRun(runId)) return latestStatus();
+        }
       }
 
       const latestPending = await readCurrentPending(chatKey);
@@ -216,7 +247,9 @@ export function createBackendVerifier({
         return latestStatus();
       }
       if (!latestPending.length && (!needsFullConfirmation || backendMatchesCurrent)) {
-        if (needsFullConfirmation) {
+        await enqueueEffect(runId, () => onPendingBackupsConfirmed(confirmedRecords));
+        if (!isCurrentRun(runId)) return latestStatus();
+        if (needsFullConfirmation && !fullConfirmed) {
           const confirmation = await enqueueEffect(
             runId,
             () => confirmFullBackup({ current: latestCurrent }),
@@ -241,8 +274,8 @@ export function createBackendVerifier({
         chatKey,
         pending: latestPending,
         retryIndex,
-        detail: "酒馆聊天文件内容尚未与当前聊天完全一致。",
-        outcome: "unconfirmed",
+        detail: confirmedRecords.length && latestPending.every(record => confirmedIds.has(record.id)) ? '酒馆文件已确认，备份仍在补全；保护记录继续保留。' : "酒馆聊天文件内容尚未与当前聊天完全一致。",
+        outcome: confirmedRecords.length && latestPending.every(record => confirmedIds.has(record.id)) ? 'backup-pending' : "unconfirmed",
         runId,
       });
     } catch (error) {
@@ -408,7 +441,7 @@ export function createBackendVerifier({
       return latestStatus();
     }
     if (retryIndex < retryDelays.length) {
-      const requestedStatus = createDisplayStatus("checking", "正在检查保存状态", detail, pending);
+      const requestedStatus = createDisplayStatus("checking", outcome === 'backup-pending' ? '酒馆已保存，备份待补全' : "正在检查保存状态", detail, pending);
       const status = await prioritizeFullBackupStatus(chatKey, requestedStatus);
       await publishStatus(runId, {
         status,
@@ -427,13 +460,18 @@ export function createBackendVerifier({
 
     const requestedStatus = outcome === "unavailable"
       ? createDisplayStatus("verify-unavailable", "无法确认保存状态", detail, pending)
-      : createDisplayStatus("unconfirmed", "酒馆保存待确认", detail, pending);
+      : createDisplayStatus("unconfirmed", outcome === 'backup-pending' ? '酒馆已保存，备份待补全' : "酒馆保存待确认", detail, pending);
     const status = await prioritizeFullBackupStatus(chatKey, requestedStatus);
     return publishStatus(runId, {
       status,
       meta: { chatKey, outcome, pending },
       refresh: true,
     });
+  }
+
+  function publishBackupFailure(runId, chatKey, retryIndex, status) {
+    if (retryIndex < retryDelays.length && isCurrentRun(runId)) scheduleVerificationForRun({ type: 'pending', chatKey, delayMs: retryDelays[retryIndex], retryIndex: retryIndex + 1, runId });
+    return publishStatus(runId, { status, refresh: true });
   }
 
   async function readBackendForRun({ current, runId }) {

@@ -23,6 +23,8 @@ import { readBackendChat } from "../verifier/backend-reader.js";
 import { refreshBoundedFullBackup } from '../backup/full-bounded.js';
 import { readBackupRecords, writeBackupRecords, backupBatches, backupFailure } from '../storage/backup-batches.js';
 import { backupFailureStatus } from '../backup/failure-status.js';
+import { protectPendingRecord, pendingRepairTriggers } from '../backup/pending-protection.js';
+import { hashCanonicalMessage } from '../backup/canonicalize.js';
 
 export function createBackupCoordinator({
   storage = defaultBackupStorage,
@@ -46,6 +48,7 @@ export function createBackupCoordinator({
   let legacyRenameObservation = null;
   const fullViews = new Map();
   const backupProblems = new Map();
+  const backupRepairs = new Map();
   let sourceEpoch = 0, queuedBackup = Promise.resolve();
   function runBackupNow(trigger = {}) {
     const run = queuedBackup.then(() => runBackupNowImpl(trigger));
@@ -56,7 +59,7 @@ export function createBackupCoordinator({
     const eventName = typeof trigger === "string" ? trigger : trigger.eventName || "manual";
     const args = typeof trigger === "string" ? [] : trigger.args || [];
     const verifyNow = typeof trigger === "object" && Boolean(trigger.verifyNow);
-    const triggerList = typeof trigger === "object" && Array.isArray(trigger.triggers) && trigger.triggers.length
+    let triggerList = typeof trigger === "object" && Array.isArray(trigger.triggers) && trigger.triggers.length
       ? trigger.triggers
       : [{ eventName, args }];
     const settings = getSettings();
@@ -93,6 +96,7 @@ export function createBackupCoordinator({
     }
 
     const failures = [];
+    let pendingForBackup = [];
 
     try {
       const session = await storage.open();
@@ -104,8 +108,18 @@ export function createBackupCoordinator({
           args: item.args,
         }));
 
-        const records = [...new Map(pendingRecords.map(row => [row.id, row])).values()];
+        const records = [...new Map(pendingRecords.map(row => [row.id, protectPendingRecord(row, settings, current.chat.length)])).values()];
+        pendingForBackup = records;
         if (records.length) await writeBackupRecords(session, { chatKey: current.identity.chatKey, store: 'pending_changes', rows: records });
+        if (session.capabilities?.boundedBackup || typeof session.getPendingChanges === 'function') {
+          pendingForBackup = await readBackupRecords(session, current.identity.chatKey, 'pending_changes');
+          const legacy = pendingForBackup.filter(record => !Array.isArray(record.backupTargets)).map(record => protectPendingRecord(record, settings, current.chat.length));
+          if (legacy.length) {
+            await writeBackupRecords(session, { chatKey: current.identity.chatKey, store: 'pending_changes', rows: legacy });
+            const upgraded = new Map(legacy.map(record => [record.id, record]));
+            pendingForBackup = pendingForBackup.map(record => upgraded.get(record.id) ?? record);
+          }
+        }
       } finally {
         session.close();
       }
@@ -114,10 +128,12 @@ export function createBackupCoordinator({
       failures.push(backupFailureStatus(error));
     }
 
+    const historicalTriggers = [...triggerList, ...pendingRepairTriggers(pendingForBackup, current, settings, { historicalOnly: true })];
+    triggerList = [...triggerList, ...pendingRepairTriggers(pendingForBackup, current, settings)];
     const historicalStatus = await refreshHistoricalBackup({
       current,
       settings,
-      triggers: triggerList,
+      triggers: historicalTriggers,
     });
     if (historicalStatus) failures.push(historicalStatus);
 
@@ -133,10 +149,16 @@ export function createBackupCoordinator({
       if (['db-error','backup-update-failed'].includes(recentStatus.code)) failures.push(recentStatus);
     }
 
-    const fullStatus = await refreshFullBackup({ current, settings, triggers: triggerList, reason: eventName });
+    const fullStatus = await refreshFullBackup({ current, settings, triggers: triggerList, reason: eventName, pendingRecords: pendingForBackup });
     if (['db-error','backup-update-failed'].includes(fullStatus?.code)) failures.push(fullStatus);
-    if (failures.length) { backupProblems.set(current.identity.chatKey, failures[0]); setStatus(failures[0]); await refreshVisiblePanel(); return failures[0]; }
+    if (failures.length) {
+      backupProblems.set(current.identity.chatKey, failures[0]); setStatus(failures[0]);
+      backupRepairs.set(current.identity.chatKey, pendingForBackup);
+      if (pendingForBackup.length) scheduleBackendVerification?.(current.identity.chatKey, settings.backendVerifyDelayMs, 0);
+      await refreshVisiblePanel(); return failures[0];
+    }
     backupProblems.delete(current.identity.chatKey);
+    backupRepairs.delete(current.identity.chatKey);
     const pending = await readCurrentPending(current.identity.chatKey);
     const requestedStatus = fullStatus?.code === "full-frozen"
       ? fullStatus
@@ -186,7 +208,7 @@ export function createBackupCoordinator({
     return getLatestStatus();
   }
 
-  async function refreshFullBackup({ current, settings, triggers, reason, backendConfirmed = false }) {
+  async function refreshFullBackup({ current, settings, triggers, reason, backendConfirmed = false, pendingRecords = [] }) {
     if (!settings.enabled || !settings.fullBackupEnabled) {
       return null;
     }
@@ -195,7 +217,9 @@ export function createBackupCoordinator({
       const session = await storage.open();
       try {
         if (session.capabilities?.boundedBackup) {
-          const result = await refreshBoundedFullBackup({ session, current, settings, triggers, reason, backendConfirmed, views: fullViews, readCurrent: () => getContextReader().readCurrentChat(), epoch: () => sourceEpoch });
+          const structural = pendingRecords.find(record => !Number.isInteger(record.messageIndex) && record.backupTargets?.includes('full_messages'));
+          const sourceChatHash = backendConfirmed ? hashCanonicalChat(current.chat) : structural && hashCanonicalChat(current.chat) === structural.canonicalChatHash ? structural.canonicalChatHash : null;
+          const result = await refreshBoundedFullBackup({ session, current, settings, triggers, reason, backendConfirmed, sourceChatHash, views: fullViews, readCurrent: () => getContextReader().readCurrentChat(), epoch: () => sourceEpoch });
           return result ? createBackupStatus(result.code, result.shortText, result.detail ?? '') : null;
         }
         const meta = await session.getChatMeta(current.identity.chatKey);
@@ -273,18 +297,21 @@ export function createBackupCoordinator({
         session.close();
       }
     } catch (error) {
+      fullViews.delete(current.identity.chatKey);
       console.error("[boxed-lllllabc] 完整聊天备份失败", error);
       return backupFailureStatus(error);
     }
   }
 
   async function confirmFullBackupAfterBackendVerification({ current }) {
+    const pendingRecords = await readCurrentPending(current.identity.chatKey);
     return refreshFullBackup({
       current,
       settings: getSettings(),
       triggers: [{ eventName: "backend-confirmed", args: [] }],
       reason: "backend-confirmed",
       backendConfirmed: true,
+      pendingRecords,
     });
   }
 
@@ -436,7 +463,10 @@ export function createBackupCoordinator({
     try {
       const session = await storage.open();
       try {
-        await writeBackupRecords(session, { chatKey: current.identity.chatKey, store: 'historical_changes', rows: records });
+        await writeBackupRecords(session, { chatKey: current.identity.chatKey, store: 'historical_changes', rows: records, sourceUnchanged: () => {
+          const live = getContextReader().readCurrentChat();
+          return live.ok && live.identity.chatKey === current.identity.chatKey && records.every(record => hashCanonicalMessage(live.chat[record.messageIndex]) === record.canonicalHash);
+        } });
         if (session.capabilities?.boundedBackup) return;
         const historicalChanges = await session.getHistoricalChanges(current.identity.chatKey);
         await session.updateChatMetaSummary(current.identity.chatKey, {
@@ -450,6 +480,26 @@ export function createBackupCoordinator({
       console.error("[boxed-lllllabc] 历史楼层备份失败", error);
       return backupFailureStatus(error);
     }
+  }
+
+  async function ensurePendingBackups({ current, records, shouldContinue = () => true }) {
+    const live = getContextReader().readCurrentChat(), settings = getSettings();
+    if (!shouldContinue() || !live.ok || live.identity.chatKey !== current.identity.chatKey) return createDisplayStatus('checking', '备份正在补全');
+    records = [...new Map([...(backupRepairs.get(live.identity.chatKey) ?? []), ...records].map(record => [record.id, record])).values()];
+    if (records.some(record => Number.isInteger(record.messageIndex) && hashCanonicalMessage(live.chat[record.messageIndex]) !== record.canonicalHash)) return createDisplayStatus('checking', '聊天已变化，等待接续备份');
+    if (records.some(record => record.backupTargets?.some(target => target === 'full_messages' && !settings.fullBackupEnabled || target === 'historical_changes' && !settings.historicalBackupEnabled))) return createDisplayStatus('checking', '备份已暂停，保护记录仍保留');
+    const triggers = pendingRepairTriggers(records, live, settings);
+    const historical = await refreshHistoricalBackup({ current: live, settings, triggers: pendingRepairTriggers(records, live, settings, { historicalOnly: true }) });
+    if (historical) return historical;
+    if (!shouldContinue()) return createDisplayStatus('checking', '备份正在补全');
+    const full = await refreshFullBackup({ current: live, settings, triggers, reason: 'pending-backup-repair', pendingRecords: records });
+    if (full) return full;
+    if (settings.recentBackupEnabled) {
+      const recent = await refreshRecentBackup({ storage, contextReader: getContextReader(), settings, triggers, reason: 'pending-backup-repair' });
+      if (['db-error', 'backup-update-failed'].includes(recent.code)) return recent;
+    }
+    if (shouldContinue()) { backupProblems.delete(live.identity.chatKey); backupRepairs.delete(live.identity.chatKey); }
+    return null;
   }
 
   async function prioritizeFullBackupStatus(chatKey, status) {
@@ -531,6 +581,11 @@ export function createBackupCoordinator({
   }
 
   return {
+    ensurePendingBackups,
+    hasBackupProblem: chatKey => backupProblems.has(chatKey),
+    onPendingBackupsConfirmed(records) {
+      if (records.length && records.every(record => Number.isInteger(record.messageIndex) && Array.isArray(record.backupTargets))) { backupProblems.delete(records[0].chatKey); backupRepairs.delete(records[0].chatKey); }
+    },
     noteSourceChange() { sourceEpoch++; },
     confirmFullBackupAfterBackendVerification,
     createDisplayStatus,

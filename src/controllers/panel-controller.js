@@ -40,6 +40,7 @@ export function createPanelController({
   openFrozenDialog = openFrozenBackupDialog,
   onBackupsChanged = async () => {},
 }) {
+  const readFailures = new Map();
   function getPanelElements(target = "settings") {
     if (target === "status" || target === "dialog") {
       syncStatusLinePlacement();
@@ -188,7 +189,7 @@ export function createPanelController({
         renderCurrentChatPanel(panelBody, {
           onCreateSnapshot,
           summary,
-          status: getLatestStatus(),
+          status: readFailures.get(current.identity.chatKey) ?? getLatestStatus(),
           meta: panelMeta,
           messages,
           fullMessages,
@@ -225,6 +226,7 @@ export function createPanelController({
               : null,
           },
           onVerify: async () => {
+            readFailures.delete(current.identity.chatKey);
             try {
               let pendingCount = pending.length;
               if (summary) {
@@ -248,7 +250,9 @@ export function createPanelController({
                 });
               }
             } catch (error) {
-              setStatus(backupFailureStatus(error, '读取'));
+              const failure = backupFailureStatus(error, '读取');
+              readFailures.set(current.identity.chatKey, failure);
+              if (failure.code === 'db-error') setStatus(failure);
             }
             await refreshVisiblePanel();
           },
@@ -281,7 +285,10 @@ export function createPanelController({
         throw new Error("当前聊天已没有可管理的备份，请刷新后重试。");
       }
     } catch (error) {
-      setStatus(backupFailureStatus(error, '读取'));
+      const failure = backupFailureStatus(error, '读取');
+      readFailures.set(chatKey, failure);
+      if (failure.code === 'db-error') setStatus(failure);
+      globalThis.toastr?.error?.(failure.detail, '箱装辣白菜');
       await refreshVisiblePanel();
       return;
     }

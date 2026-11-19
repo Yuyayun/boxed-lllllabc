@@ -7,15 +7,15 @@ import { executeRestorePlan } from '../src/backup/restore-executor.js';
 import { createFullRestorePlan } from '../src/backup/restore.js';
 import { canonicalizeMessage } from '../src/backup/canonicalize.js';
 
-test('完整恢复延迟到预览；分页失败不应用聊天，也不冒充存储不可用', async () => {
+test('完整恢复延迟到预览；分页失败保留聊天及原保存状态', async () => {
   const current = { ok: true, identity: { chatKey: 'chat' }, chat: [{ mes: 'original' }] };
-  let reads = 0, status;
+  let reads = 0, status = { code: 'saved' };
   const session = { capabilities: { boundedBackup: 1 }, close() {}, getBackupSummary: async () => ({ revision: 1, meta: {}, counts: { pending_changes: 0, full_messages: 100, recent_messages: 0 } }), getBackupPage: async options => { reads++; if (options.store === 'full_messages') throw new Error('page failed'); return { rows: [], after: null }; } };
   const controller = createRestoreController({ storage: { open: async () => session }, getContextReader: () => ({ readCurrentChat: () => current }), getSettings: () => ({ enabled: true }), setStatus: value => { status = value; } });
   const ui = controller.createRestoreUiState({ current, messages: [], meta: {}, summary: { counts: { full_messages: 100 } } });
   assert.equal(reads, 0);
   const result = await ui.onPreviewFull();
-  assert(!result.ok); assert.equal(current.chat[0].mes, 'original'); assert.equal(status.code, 'backup-read-failed');
+  assert(!result.ok); assert.equal(current.chat[0].mes, 'original'); assert.equal(status.code, 'saved'); assert.match(result.reason, /page failed/);
 });
 test('快照整聊比较和临时指纹支持合计超过 200k 节点，既存快照格式不变', async () => {
   const chat = Array.from({ length: 3000 }, (_, i) => ({ mes: String(i), extra: Array.from({ length: 25 }, (_, key) => ({ key, value: true, info: '' })) }));

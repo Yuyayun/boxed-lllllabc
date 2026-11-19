@@ -143,13 +143,14 @@ export function createIndexedDbTransfer({ openDatabase = openBackupDatabase,onLe
       let n = 0;
       for (const name of DATA_STORES) { await cursor(store(name), (item) => { rows.put(staged(id, "backup", ++n, name, item.primaryKey, item.value)); }); await request(store(name).clear()); }
       await cursor(rows, (item) => { const row = item.value; if (row.id !== id || row.kind !== "data") return false; store(row.store).put(row.value); }, IDBKeyRange.lowerBound([id, "data"]));
-      value.phase = "committed"; await request(meta.put(value)); await request(meta.put({ key: "revision", value: value.baseRevision + 1 })); return value;
+      value.phase = "committed"; await request(meta.put(value)); await request(meta.put({ key: "revision", value: value.baseRevision + 1 })); await request(meta.put({ key: 'backup-scope-epoch', value: ((await request(meta.get('backup-scope-epoch')))?.value ?? 0) + 1 })); return value;
     });
     if (["rollback", "finish"].includes(action)) return tx("readwrite", async ({ meta, rows, store }) => {
       const value = await receipt(meta, id);
       if (!value || ["rolled-back", "finished"].includes(value.phase)) return value ?? null;
       await requireLock(meta, id);
       if (action === "rollback" && value.phase === "committed") {
+        await request(meta.put({ key: 'backup-scope-epoch', value: ((await request(meta.get('backup-scope-epoch')))?.value ?? 0) + 1 }));
         for (const name of DATA_STORES) await request(store(name).clear());
         await cursor(rows, (item) => { const row = item.value; if (row.id !== id || row.kind !== "backup") return false; store(row.store).put(row.value); }, IDBKeyRange.lowerBound([id, "backup"]));
       }
