@@ -115,4 +115,8 @@ Git 安装的扩展可在其目录执行 `git pull --ff-only` 更新当前分支
 
 [更新日志](CHANGELOG.md) 面向使用者；[本次修复与验收](docs/acceptance/2026-11-17-large-chat-backups.md) 说明最新调整，[docs/acceptance](docs/acceptance/README.md) 保留开发阶段和测试记录。
 
-作者：**辣白菜 / labaicai0969**。采用 [LICENSE](LICENSE) 中的 AFPL 9；本扩展可免费使用，禁止任何形式的商业用途。
+作者：**辣白菜 / labaicai0969**。
+
+本项目采用 [CC BY-NC-SA 4.0](LICENSE) 许可：允许在署名、非商业的前提下使用、修改与分享；公开分享改编或衍生作品时，应继续采用 CC BY-NC-SA 4.0。完整授权范围以 LICENSE 正文为准。
+
+自本次许可证迁移提交起采用 CC BY-NC-SA 4.0；此前已发布版本仍适用其发布时附带的许可证。

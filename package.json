@@ -7,7 +7,7 @@
     "type": "git",
     "url": "git+https://github.com/Yuyayun/boxed-lllllabc.git"
   },
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "CC-BY-NC-SA-4.0",
   "type": "module",
   "files": [
     "CHANGELOG.md",

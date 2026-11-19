@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
 const ROOT = new URL("../", import.meta.url);
@@ -35,10 +36,10 @@ test("发布元数据注册安装与更新后的自动刷新钩子", async () =>
   assert.match(source, /export function onExtensionUpdate\(\)/);
 });
 
-test("package.json 使用准确指向 AFPL 9 正文的许可证字段", async () => {
+test("package.json 使用 CC BY-NC-SA 4.0 的 SPDX 许可证标识", async () => {
   const packageJson = JSON.parse(await readProjectFile("package.json"));
 
-  assert.equal(packageJson.license, "SEE LICENSE IN LICENSE");
+  assert.equal(packageJson.license, "CC-BY-NC-SA-4.0");
   assert.equal(packageJson.dependencies, undefined);
   assert.equal(packageJson.devDependencies, undefined);
   assert.ok(packageJson.files.includes("src/"));
@@ -46,30 +47,17 @@ test("package.json 使用准确指向 AFPL 9 正文的许可证字段", async ()
   assert.equal(packageJson.files.some((path) => /PROJECT_HANDOFF|superpowers|testing/i.test(path)), false);
 });
 
-test("LICENSE 包含完整 AFPL 9 结构和项目版权信息", async () => {
+test("LICENSE 使用未修改的 CC BY-NC-SA 4.0 官方正文，作者信息保留在 README", async () => {
   const license = await readProjectFile("LICENSE");
+  const readme = await readProjectFile("README.md");
 
-  assert.match(license, /Aladdin Free Public License\s+\(Version 9, September 18, 2000\)/);
-  assert.match(license, /Copyright \(C\) 2026 辣白菜 \/\s*labaicai0969/);
-  assert.match(license, /computer program known as "箱装辣白菜\s+\(boxed-lllllabc\),"/);
-  assert.doesNotMatch(license, /This License applies to the computer program known as "AFPL Ghostscript\."/);
-
-  for (const heading of [
-    "0. Subject Matter",
-    "1.  Licenses.",
-    "2.  Restrictions.",
-    "3.  Reservation of Rights.",
-    "4.  Other Restrictions.",
-    "5.  Limitations.",
-    "6.  General.",
-  ]) {
-    assert.ok(license.includes(heading), `缺少许可证章节：${heading}`);
-  }
-
-  assert.match(license, /Functional use \(running\) of the Program is not restricted/);
-  assert.match(license, /You may not impose any further restrictions on the recipient's/);
-  assert.match(license, /FAR Section 12\.212/);
-  assert.ok(license.length > 11_000, "许可证正文长度异常，可能不是完整 AFPL 9");
+  // https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode.txt
+  assert.equal(
+    createHash("sha256").update(license).digest("hex"),
+    "e66c269d4819aaab34b49ef5220c4ddab6756f21bb5180761a4eb8561f2b7bbd",
+    "LICENSE 必须与官方未修改的法律文本一致",
+  );
+  assert.match(readme, /作者：\*\*辣白菜 \/ labaicai0969\*\*/);
 });
 
 test("扩展信息弹窗保留用户确认的原有提示", async () => {
