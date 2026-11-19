@@ -35,3 +35,10 @@ test('空闲不沿用旧阶段、数量或线程运行时间；排队与执行�
   assert.match(supervisorProgressText({state:'queued',elapsedMs:2000}),/排队，已等待 2 秒/);
   assert.match(supervisorProgressText({state:'working',elapsedMs:3000}),/当前任务已用 3 秒/);
 });
+
+test('欢迎页服务器检查取消按连接检查说明，写入取消仍保留结果核对提示',()=>{
+  const status=formatRuntimeLog({operation:'_status',stage:'error',errorCode:'cancelled',elapsedMs:51400});
+  assert.match(status,/检查服务器存储.*51.4 秒.*本次连接检查已取消.*cancelled/);
+  assert.doesNotMatch(status,/日常备份操作|需要检查操作结果/);
+  assert.match(formatRuntimeLog({operation:'putFullMessages',stage:'error',errorCode:'cancelled'}),/保存完整聊天备份.*需要检查操作结果/);
+});
