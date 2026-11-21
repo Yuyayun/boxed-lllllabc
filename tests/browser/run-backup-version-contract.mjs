@@ -1,13 +1,42 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
+import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
 const { chromium } = await import(process.env.BOXED_PLAYWRIGHT_PATH ? pathToFileURL(process.env.BOXED_PLAYWRIGHT_PATH).href : 'playwright');
+const mode = process.env.BOXED_SERVER_REPOSITORY ? 'sqlite' : 'indexeddb', nonce = randomUUID();
+let routes, directory;
+const handlers = new Map();
+if (mode === 'sqlite') {
+  directory = await fs.mkdtemp(path.join(await fs.realpath(os.tmpdir()), 'boxed-version-browser-'));
+  const storage = path.join(directory, 'boxed-storage'); await fs.mkdir(storage);
+  const { installRoutes } = await import(pathToFileURL(path.join(process.env.BOXED_SERVER_REPOSITORY, 'src/router.js')).href);
+  const host = { root: directory, dataRoot: path.join(directory, 'data'), defaultHandle: 'default-user', users: async () => [], csrfEnabled: () => true,
+    config: (key, fallback) => key === 'boxedLllllabc.databaseDirectory' ? storage : key === 'enableUserAccounts' ? false : fallback };
+  routes = installRoutes({ get: (name, handler) => handlers.set('GET ' + name, handler), post: (name, handler) => handlers.set('POST ' + name, handler) }, { host });
+}
 const server = http.createServer(async (request, response) => {
   const pathname = new URL(request.url, 'http://127.0.0.1').pathname;
+  if (pathname.startsWith('/api/plugins/boxed-lllllabc/')) {
+    try {
+      if (!routes || request.headers['x-test-nonce'] !== nonce) { response.writeHead(403).end(); return; }
+      const chunks = []; let bytes = 0;
+      for await (const chunk of request) { bytes += chunk.length; if (bytes > 2 * 1024 * 1024) throw new Error('Fixture body limit'); chunks.push(chunk); }
+      request.body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : undefined;
+      request.protocol = 'http'; request.get = name => request.headers[name.toLowerCase()];
+      request.user = { profile: { handle: 'default-user', enabled: true } }; request.session = { handle: 'default-user' };
+      response.set = (key, value) => response.setHeader(key, value); response.status = code => { response.statusCode = code; return response; };
+      response.json = value => { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify(value)); };
+      const route = handlers.get(request.method + ' ' + pathname.slice('/api/plugins/boxed-lllllabc'.length));
+      if (!route) { response.writeHead(404).end(); return; }
+      await route(request, response);
+    } catch (error) { if (!response.destroyed && !response.headersSent) response.writeHead(500).end(JSON.stringify({ reason: error.message })); else response.destroy(error); }
+    return;
+  }
   if (pathname === '/') { response.setHeader('Content-Type', 'text/html'); response.end('<meta name="viewport" content="width=device-width">'); return; }
   const file = path.resolve(root, '.' + pathname), relative = path.relative(root, file);
   if (relative.startsWith('..') || path.isAbsolute(relative) || !/^\/(src|tests)\/.+\.js$/.test(pathname)) { response.writeHead(404).end(); return; }
@@ -24,9 +53,26 @@ try {
       const page = await context.newPage(), errors = [];
       page.on('pageerror', error => errors.push(error.message));
       await page.goto(`http://127.0.0.1:${server.address().port}`);
-      const checks = await page.evaluate(async () => (await import('/tests/browser/backup-version-contract.js')).runBackupVersionContract());
-      assert.equal(checks.length, 27); assert.deepEqual(errors, []);
-      console.log(JSON.stringify({ mobile, checks: checks.length, cases: checks }));
+      const checks = await page.evaluate(async options => (await import('/tests/browser/backup-version-contract.js')).runBackupVersionContract(options), { mode, nonce });
+      assert.equal(checks.length, mode === 'sqlite' ? 26 : 27);
+      let historicalRepairCases;
+      if (mode === 'sqlite') {
+        historicalRepairCases = await page.evaluate(async nonce => {
+          const { createSqliteStorage } = await import('/src/storage/sqlite-client.js');
+          const { runHistoricalRepairContract } = await import('/tests/browser/historical-repair-contract.js');
+          return runHistoricalRepairContract({ adapter: createSqliteStorage({ getRequestHeaders: () => ({ 'X-Test-Nonce': nonce, 'X-CSRF-Token': nonce }) }), mode: 'sqlite' });
+        }, nonce);
+        assert.equal(historicalRepairCases.length, 6);
+      }
+      assert.deepEqual(errors, []);
+      console.log(JSON.stringify({ mode, mobile, checks: checks.length, cases: checks, historicalRepairCases }));
     } finally { await context.close(); }
   }
-} finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }
+} finally {
+  await browser?.close(); await routes?.close(); await new Promise(resolve => server.close(resolve));
+  if (directory) {
+    const resolved = await fs.realpath(directory), base = await fs.realpath(os.tmpdir());
+    assert.equal(path.dirname(resolved), base); assert(path.basename(resolved).startsWith('boxed-version-browser-'));
+    await fs.rm(resolved, { recursive: true });
+  }
+}

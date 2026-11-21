@@ -6,19 +6,19 @@ import { readBackupRecords } from '../../src/storage/backup-batches.js';
 import { createFullRestorePlan, createHistoricalRestorePlan } from '../../src/backup/restore.js';
 import { executeRestorePlan } from '../../src/backup/restore-executor.js';
 
-export async function runHistoricalRepairContract() {
+export async function runHistoricalRepairContract({ adapter = createIndexedDbStorage(), mode = 'indexeddb' } = {}) {
   if (location.hostname !== '127.0.0.1') throw new Error('仅在隔离测试 origin 执行');
   const checks = [], assert = (condition, message) => { if (!condition) throw new Error(message); };
-  const wait = async predicate => { for (let n = 0; n < 100; n++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 5)); } throw new Error('等待测试操作完成超时'); };
-  const adapter = createIndexedDbStorage();
+  const wait = async predicate => { const deadline = Date.now() + 5000; while (Date.now() < deadline) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 5)); } throw new Error('等待测试操作完成超时'); };
   let sequence = 0;
+  const runId = crypto.randomUUID();
   async function fixture(index = 26) {
-    const key = `character:repair-test.png:${++sequence}`, timers = new Map();
+    const key = `character:repair-test.png:${runId}-${++sequence}`, timers = new Map();
     const current = { ok: true, identity: { ok: true, chatKey: key, meta: { chatKey: key } }, chat: Array.from({ length: 1136 }, (_, i) => ({ mes: i === index ? '旧 user 正文' : `正文 ${i}`, is_user: i === index })) };
     const settings = { enabled: true, fullBackupEnabled: true, recentBackupEnabled: true, historicalBackupEnabled: true, recentLimit: 10, backendVerifyDelayMs: 2000 };
     let hook, latest = { code: 'idle' }, coordinator, verifier, nextTimer = 0;
     const setStatus = value => { latest = value; };
-    const storage = { getMode: () => 'indexeddb', async open() {
+    const storage = { getMode: () => mode, async open() {
       const session = await adapter.open(), wrapped = { ...session };
       for (const [name, method] of Object.entries(session)) if (typeof method === 'function' && name !== 'close') wrapped[name] = async (...args) => { await hook?.(name, args); return method(...args); };
       return wrapped;
@@ -53,12 +53,12 @@ export async function runHistoricalRepairContract() {
     const f = await fixture(index); let queued, cleanups = 0;
     try {
       f.setHook(async name => { if (name === 'cleanupBackupWrites' && ++cleanups === 4) { f.setHook(null); queued = f.next(); } });
-      const interrupted = await f.edit(); assert(interrupted.storageErrorCode === 'backup-source-changed', '未触发预期来源中断');
+      const interrupted = await f.edit(); assert(interrupted.storageErrorCode === 'backup-source-changed', `未触发预期来源中断: ${JSON.stringify(interrupted)}; cleanup=${cleanups}`);
       await queued; await f.verify(); assert(f.latest.code === 'saved' && !(await f.read('pending_changes')).length, '补写后不能确认保存');
       await f.recover('full'); await f.recover('historical'); checks.push(`user-${index}:source-interruption-and-restore`);
     } finally { f.close(); }
   }
-  {
+  if (mode === 'indexeddb') {
     const f = await fixture(), original = IDBObjectStore.prototype.put, failures = new Set(['full_messages', 'historical_changes']);
     try {
       IDBObjectStore.prototype.put = function (...args) { if (failures.delete(this.name)) throw new DOMException('test quota failure', 'QuotaExceededError'); return original.apply(this, args); };

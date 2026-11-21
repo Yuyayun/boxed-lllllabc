@@ -1,5 +1,6 @@
 import { backupVersionCases } from '../contracts/backup-version-contract.js';
 import { createIndexedDbStorage } from '../../src/storage/indexeddb-adapter.js';
+import { createSqliteStorage } from '../../src/storage/sqlite-client.js';
 import * as batches from '../../src/storage/backup-batches.js';
 import { createBatchCleanupPlan } from '../../src/backup/batch-cleanup.js';
 import { createRestoreController } from '../../src/controllers/restore-controller.js';
@@ -7,12 +8,12 @@ import { canonicalizeMessage } from '../../src/backup/canonicalize.js';
 import * as database from '../../src/db/index.js';
 
 const assert = (value, message) => { if (!value) throw new Error(message); };
-export async function runBackupVersionContract() {
+export async function runBackupVersionContract({ mode = 'indexeddb', nonce } = {}) {
   if (location.hostname !== '127.0.0.1') throw new Error('仅在隔离测试 origin 执行');
-  const checks = [], adapter = createIndexedDbStorage();
+  const checks = [], adapter = mode === 'sqlite' ? createSqliteStorage({ getRequestHeaders: () => ({ 'X-Test-Nonce': nonce, 'X-CSRF-Token': nonce }) }) : createIndexedDbStorage();
   for (const { name, run } of backupVersionCases({ ...batches, createBatchCleanupPlan })) {
     const opened = await adapter.open();
-    try { await run({ ...opened, testMode: 'indexeddb' }); checks.push(name); }
+    try { await run({ ...opened, testMode: mode }); checks.push(name); }
     finally { opened.close(); }
   }
 
@@ -36,7 +37,7 @@ export async function runBackupVersionContract() {
     ];
     for (const [action, argument, expectedStores] of actions) {
       const read = new Set(); let recentUpdates = 0, saveDialog = false;
-      const storage = { getMode: () => 'indexeddb', open: async () => ({ ...session, close() {}, async getBackupPage(options) {
+      const storage = { getMode: () => mode, open: async () => ({ ...session, close() {}, async getBackupPage(options) {
         read.add(options.store);
         assert(expectedStores.includes(options.store), `${action} 读取了无关正文 ${options.store}`);
         if (action === 'onPreviewFull' && options.store === 'full_messages') {
@@ -60,6 +61,7 @@ export async function runBackupVersionContract() {
     }
 
     // Exercise the raw-key delete branch, including an already absent key.
+    if (mode === 'indexeddb') {
     const db = await database.openBackupDatabase();
     try {
       const before = await session.getBackupSummary(key);
@@ -71,6 +73,7 @@ export async function runBackupVersionContract() {
       assert(deleted.scopes.pending_changes.revision === before.scopes.pending_changes.revision + 1, '真实键删除必须推进版本');
       checks.push('原生键删除仅在记录存在时推进版本');
     } finally { db.close(); }
+    }
   } finally { session.close(); }
   return checks;
 }
