@@ -13,8 +13,7 @@ function fixture() {
   const driver = name => ({ get: value => tables.get(name).get(JSON.stringify(value)), put: row => tables.get(name).set(key(name, row), structuredClone(row)), delete: value => tables.get(name).delete(JSON.stringify(value)) });
   const operations = createBackupOperations({
     requestToPromise: async value => value,
-    runTransaction: async (_db, names, _mode, callback, options) => {
-      if (names.includes('pending_changes') && names.length > 1) assert.deepEqual(options.writeStores, ['pending_changes']);
+    runTransaction: async (_db, names, _mode, callback) => {
       return callback(new Map(names.map(name => [name, driver(name)])));
     },
   });

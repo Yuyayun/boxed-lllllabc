@@ -56,13 +56,22 @@ try {
   assert.throws(() => encodeStorageValue(rows), /结构超过/);
   await writeBackupRecords(session, { chatKey: 'large', store: 'full_messages', rows, replace: true, meta: { fullBackupMessageCount: 3000 } });
   const read = await readBackupRecords(session, 'large', 'full_messages'); assert.equal(read.length, 3000);
+  await session.updateChatMetaSummary('large', { fullBackupState: 'frozen' });
+  const beforeIdentityChecks = await session.getBackupSummary('large');
   let pagesDuringVerification = 0;
   const concurrentRead = await readBackupRecords({ ...session, getBackupPage: async options => {
     const page = await session.getBackupPage(options);
     if (++pagesDuringVerification === 1) await session.updateChatMetaSummary('large', { lastBackendStatus: 'saved' });
+    await session.reconcileChatIdentity({ chatKey: 'large', meta: { chatKey: 'large', chatId: 'large' } });
+    await session.putFullMessages({ chatKey: 'large', messages: [] });
+    await session.deletePendingChangesIfUnchanged([{ ...protection, id: 'large:missing', chatKey: 'large' }]);
     return page;
   } }, 'large', 'full_messages');
   assert.equal(concurrentRead.length, 3000); assert.equal(pagesDuringVerification, 60);
+  const afterIdentityChecks = await session.getBackupSummary('large');
+  assert.deepEqual(afterIdentityChecks.scopes, beforeIdentityChecks.scopes);
+  assert.equal(afterIdentityChecks.meta.fullBackupState, 'frozen');
+  await session.updateChatMetaSummary('large', { fullBackupState: 'active' });
   await writeBackupRecords(session, { chatKey: 'large', store: 'full_messages', rows: [canonicalizeMessage({ mes: 'edited' }, 427), canonicalizeMessage({ mes: 'new' }, 3000)], meta: { fullBackupMessageCount: 3001 } });
   assert.equal((await session.getBackupSummary('large')).counts.full_messages, 3001);
   fresh.dropNextCommit();
@@ -94,7 +103,7 @@ try {
     } else await assert.rejects(writeBackupRecords(oldServer, { chatKey: 'too-big', store: 'full_messages', rows, replace: true }), { code: 'backup-upgrade-required' });
     oldServer.close();
   }
-  session.close(); console.log(JSON.stringify({ newClientNewServer: true, floors: 3001, maxRequestBytes: fresh.maxRequest, hugeChatBytes: hugeCatalog.full.storageBytes, lostCommitResponseRecovered: true, lostPatchResponseRetained: true, conditionalBackupProof: true, pagesDuringVerification, oldClientNewServer: Boolean(process.env.BOXED_OLD_FRONTEND_ROOT), newClientOldServer: Boolean(process.env.BOXED_OLD_SERVER_REPOSITORY) }));
+  session.close(); console.log(JSON.stringify({ newClientNewServer: true, floors: 3001, maxRequestBytes: fresh.maxRequest, hugeChatBytes: hugeCatalog.full.storageBytes, lostCommitResponseRecovered: true, lostPatchResponseRetained: true, conditionalBackupProof: true, pagesDuringVerification, identityAndNoopsDuringFrozenRead: true, oldClientNewServer: Boolean(process.env.BOXED_OLD_FRONTEND_ROOT), newClientOldServer: Boolean(process.env.BOXED_OLD_SERVER_REPOSITORY) }));
 } finally {
   for (const entry of fixtures.reverse()) await entry.close();
   const resolved = await fs.realpath(directory); assert.equal(path.dirname(resolved), base); assert(path.basename(resolved).startsWith('boxed-large-http-')); await fs.rm(resolved, { recursive: true });

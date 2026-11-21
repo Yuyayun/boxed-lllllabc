@@ -17,22 +17,23 @@ test("发布元数据指向真实 GitHub 仓库", async () => {
   const changelog = await readProjectFile("CHANGELOG.md");
 
   assert.equal(manifest.homePage, REPOSITORY_URL);
-  assert.equal(manifest.version, "1.0.3");
+  assert.equal(manifest.version, "1.0.4");
   assert.equal(packageJson.version, manifest.version);
   assert.equal(packageJson.homepage, REPOSITORY_URL);
   assert.equal(packageJson.repository.url, `git+${REPOSITORY_URL}.git`);
   assert.ok((await readProjectFile("settings.html")).includes(`id="boxed-lllllabc-version">Ver ${manifest.version}</`));
   assert.match(changelog, new RegExp(`^##\\s+${manifest.version.replaceAll(".", "\\.")}(?:\\s|$)`, "m"));
   const announcement = parseVersionChangelog(changelog, manifest.version);
-  assert.equal(announcement?.date, '2026-11-20');
+  assert.equal(announcement?.date, '2026-11-21');
   const announcementText = announcement.blocks.flatMap(block => block.items ?? [block.text]).join('\n');
-  assert.match(announcementText, /旧楼层修改/);
-  assert.match(announcementText, /前端扩展与服务器插件一并更新至 1\.0\.3/);
+  assert.match(announcementText, /备份内容发生变化/);
+  assert.match(announcementText, /前端扩展与服务器插件一并更新至 1\.0\.4/);
   const readme = await readProjectFile('README.md');
-  assert.ok(readme.includes(`最新正式版：${manifest.version}`));
-  assert.ok(readme.includes(`${REPOSITORY_URL}/releases/tag/v${manifest.version}`));
-  assert.ok(readme.includes(`boxed-lllllabc-v${manifest.version}.zip`));
-  assert.doesNotMatch(readme, /尚未发布|当前分支版本/);
+  assert.ok(readme.includes(`当前分支版本：${manifest.version}`));
+  assert.ok(readme.includes('尚未正式发布'));
+  assert.ok(readme.includes('最新正式版：1.0.3'));
+  assert.ok(readme.includes(`${REPOSITORY_URL}/releases/tag/v1.0.3`));
+  assert.ok(readme.includes('boxed-lllllabc-v1.0.3.zip'));
 });
 
 test("发布元数据注册安装与更新后的自动刷新钩子", async () => {

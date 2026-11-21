@@ -2,6 +2,8 @@
 
 SillyTavern 聊天保存状态与备份扩展，帮助你查看备份、找回丢失或误改的聊天内容。
 
+**当前分支版本：1.0.4（开发版，尚未正式发布）**。修复身份核对和空操作误报“备份内容发生变化”，收窄恢复预览的读取范围。服务器存储请同时使用本次 1.0.4 后端分支。下方正式版下载仍指向已发布的 1.0.3。
+
 **最新正式版：1.0.3** · [正式版下载](https://github.com/Yuyayun/boxed-lllllabc/releases/tag/v1.0.3)。修复旧楼层修改在备份中断后漏补、救档恢复旧正文，以及服务器保存确认时的并发冲突和状态误报；同时改善手机顶部操作区和运行日志。
 
 只安装前端就能使用浏览器本地备份（IndexedDB）。[服务器插件](https://github.com/Yuyayun/boxed-lllllabc-server)是可选组件；安装后仍由你决定是否切换位置，不会自动迁移，也不会同步两个位置的数据。
@@ -26,7 +28,7 @@ git clone --branch main https://github.com/Yuyayun/boxed-lllllabc.git public/scr
 
 Git 安装的扩展可在其目录执行 `git pull --ff-only` 更新当前分支。使用 ZIP 更新时，先把旧代码目录移到扩展目录以外留存，再放入新目录，避免同时加载两份扩展。更新前结束生成和正在进行的存储操作，保留浏览器站点数据。
 
-使用服务器存储时，请将前端扩展和配套服务器插件一并更新至 1.0.3。无需清库或重新迁移备份；旧后端缺少保护能力时，会保留待确认记录并提示更新。浏览器本地备份仍可独立使用。
+测试本分支的服务器存储修复时，请将前端扩展与配套服务器插件一并切换到 `codex/1.0.4-backup-version`，版本均为 1.0.4。无需清库或重新迁移备份；旧后端缺少保护能力时，会保留待确认记录并提示更新。浏览器本地备份仍可独立使用。
 
 ## 开始使用
 
@@ -109,11 +111,11 @@ Git 安装的扩展可在其目录执行 `git pull --ff-only` 更新当前分支
 
 本机已检查 SillyTavern 1.15.0、1.19.0，完成约 479 MB 级、超过 1 GiB 数据的往返、重启与旧版数据升级检查。手机 Termux、真实软键盘及 Safari 的结果不能由桌面测试代替。
 
-浏览器旧备份升级后仍留在浏览器，不自动迁往服务器。本版结果见[1.0.3 正式发布核对](docs/acceptance/release-1.0.3.md)及[备份竞态修复验收](docs/acceptance/2026-11-19-backup-race-fix.md)；此前结果见[1.0.2 超大聊天修复验收](docs/acceptance/2026-11-17-large-chat-backups.md)、[1.0.1 本机验收记录](docs/acceptance/1.0.1-desktop-acceptance.md)，手机步骤见[Termux 验收清单](docs/acceptance/1.0.1-termux-checklist.md)。
+浏览器旧备份升级后仍留在浏览器，不自动迁往服务器。本分支结果见[1.0.4 正文版本回归修复验收](docs/acceptance/2026-11-21-backup-version-fix.md)；已发布版见[1.0.3 正式发布核对](docs/acceptance/release-1.0.3.md)及[备份竞态修复验收](docs/acceptance/2026-11-19-backup-race-fix.md)；此前结果见[1.0.2 超大聊天修复验收](docs/acceptance/2026-11-17-large-chat-backups.md)、[1.0.1 本机验收记录](docs/acceptance/1.0.1-desktop-acceptance.md)，手机步骤见[Termux 验收清单](docs/acceptance/1.0.1-termux-checklist.md)。
 
 ## 开发记录与许可
 
-[更新日志](CHANGELOG.md) 面向使用者；[本次修复与验收](docs/acceptance/2026-11-19-backup-race-fix.md) 说明最新调整，[docs/acceptance](docs/acceptance/README.md) 保留开发阶段和测试记录。
+[更新日志](CHANGELOG.md) 面向使用者；[本次修复与验收](docs/acceptance/2026-11-21-backup-version-fix.md) 说明当前分支调整，[docs/acceptance](docs/acceptance/README.md) 保留开发阶段和测试记录。
 
 作者：**辣白菜 / labaicai0969**。
 

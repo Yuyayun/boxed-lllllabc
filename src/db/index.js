@@ -87,12 +87,13 @@ function snapshotDriver(store) {
   };
 }
 
-function runTransaction(db, storeNames, mode, callback, { writeStores = storeNames } = {}) {
+function runTransaction(db, storeNames, mode, callback) {
   return new Promise((resolve, reject) => {
     const guarded = db.objectStoreNames?.contains(TRANSFER_STORES.meta);
     const physicalNames = storeNames.flatMap(name => [name, datasetStore(name, 1)].filter(physical => db.objectStoreNames?.contains(physical) ?? physical === name));
     const transaction = db.transaction(guarded ? [...physicalNames, TRANSFER_STORES.meta] : physicalNames, mode);
     let callbackResult;
+    const changedStores = new Set();
 
     transaction.oncomplete = () => resolve(callbackResult);
     transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB 事务失败。"));
@@ -104,7 +105,8 @@ function runTransaction(db, storeNames, mode, callback, { writeStores = storeNam
         const active = guarded ? datasetId((await requestToPromise(transaction.objectStore(TRANSFER_STORES.meta).get(ACTIVE_DATASET_KEY)))?.value) : 0;
         const stores = new Map(storeNames.map((name) => {
           const store = transaction.objectStore(datasetStore(name, active));
-          return [name, name === STORES.snapshots || name === STORES.snapshotMessages ? snapshotDriver(store) : mutationDriver(store)];
+          return [name, name === STORES.snapshots || name === STORES.snapshotMessages ? snapshotDriver(store)
+            : mutationDriver(store, mode === 'readwrite' && BACKUP_STORES.includes(name) ? () => changedStores.add(name) : undefined)];
         }));
         return callback(stores);
       })
@@ -113,7 +115,7 @@ function runTransaction(db, storeNames, mode, callback, { writeStores = storeNam
           const meta = transaction.objectStore(TRANSFER_STORES.meta);
           const revision = (await requestToPromise(meta.get("revision")))?.value ?? 0;
           await requestToPromise(meta.put({ key: "revision", value: revision + 1 }));
-          for (const name of writeStores.filter(name => BACKUP_STORES.includes(name))) {
+          for (const name of changedStores) {
             const key = backupVersionKey(name), previous = (await requestToPromise(meta.get(key)))?.value ?? 0;
             await requestToPromise(meta.put({ key, value: previous + 1 }));
           }

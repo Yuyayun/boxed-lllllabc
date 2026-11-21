@@ -51,9 +51,10 @@ export function createRestoreController({
           session = await storage.open();
           const full = action === 'onPreviewFull' || action === 'onOpenRecovery';
           const historical = action === 'onPreviewHistorical' || action === 'onOpenRecovery';
-          const stores = ['pending_changes', ...(full ? ['full_messages'] : []), ...(historical ? ['historical_changes'] : []), 'recent_messages'];
+          const recent = action === 'onPreviewRecent' || action === 'onOpenRecovery';
+          const stores = ['pending_changes', ...(full ? ['full_messages'] : []), ...(historical ? ['historical_changes'] : []), ...(recent ? ['recent_messages'] : [])];
           const { records, summary: state } = await readBackupBundle(session, fresh.identity.chatKey, stores);
-          const loadedPending = records.pending_changes, loadedFull = records.full_messages ?? [], loadedHistorical = records.historical_changes ?? [], loadedRecent = records.recent_messages;
+          const loadedPending = records.pending_changes, loadedFull = records.full_messages ?? [], loadedHistorical = records.historical_changes ?? [], loadedRecent = records.recent_messages ?? [];
           const ui = createRestoreUiState({ current: fresh, messages: loadedRecent, fullMessages: loadedFull, historicalChanges: loadedHistorical, pending: loadedPending, meta: state.meta ?? meta });
           return ui[action]?.(argument);
         } catch (error) { const status = backupFailureStatus(error, '读取'); if (status.code === 'db-error') setStatus(status); globalThis.toastr?.error?.(status.detail, '箱装辣白菜'); return { ok: false, reason: status.detail }; }

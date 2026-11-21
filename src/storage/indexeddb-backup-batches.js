@@ -51,7 +51,11 @@ export function createIndexedDbBackupBatches({ openDatabase }) {
               async jobs() { const result = []; await iterate(meta, IDBKeyRange.bound('backup-write:', 'backup-write:\uffff'), cursor => { result.push(cursor.value.value); if (result.length >= 20) return false; }); return result; },
               get: (name, key) => request(store(name).get(key)), put: (name, value) => request(store(name).put(value)),
               async counts(chatKey) { const values = {}; for (const name of BACKUP_STORES) values[name] = await request(store(name).index('by_chat').count(chatKey)); return values; },
-              deleteChat: (name, chatKey) => iterate(store(name).index('by_chat'), IDBKeyRange.only(chatKey), cursor => request(cursor.delete())),
+              async deleteChat(name, chatKey) {
+                let count = 0;
+                await iterate(store(name).index('by_chat'), IDBKeyRange.only(chatKey), async cursor => { await request(cursor.delete()); count++; });
+                return count;
+              },
               async page(name, chatKey, after, hashesOnly) {
                 const rows = []; let bytes = 1024, nodes = 100, last = null, more = false;
                 const source = name === 'pending_changes' ? store(name).index('by_chat') : store(name);
