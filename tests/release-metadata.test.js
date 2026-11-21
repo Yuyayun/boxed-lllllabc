@@ -29,11 +29,10 @@ test("发布元数据指向真实 GitHub 仓库", async () => {
   assert.match(announcementText, /备份内容发生变化/);
   assert.match(announcementText, /前端扩展与服务器插件一并更新至 1\.0\.4/);
   const readme = await readProjectFile('README.md');
-  assert.ok(readme.includes(`当前分支版本：${manifest.version}`));
-  assert.ok(readme.includes('尚未正式发布'));
-  assert.ok(readme.includes('最新正式版：1.0.3'));
-  assert.ok(readme.includes(`${REPOSITORY_URL}/releases/tag/v1.0.3`));
-  assert.ok(readme.includes('boxed-lllllabc-v1.0.3.zip'));
+  assert.ok(readme.includes(`最新正式版：${manifest.version}`));
+  assert.ok(readme.includes(`${REPOSITORY_URL}/releases/tag/v${manifest.version}`));
+  assert.ok(readme.includes(`boxed-lllllabc-v${manifest.version}.zip`));
+  assert.doesNotMatch(readme, /尚未正式发布|当前分支版本/);
 });
 
 test("发布元数据注册安装与更新后的自动刷新钩子", async () => {
