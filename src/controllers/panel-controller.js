@@ -140,6 +140,7 @@ export function createPanelController({
     if (!current.ok) {
       renderCurrentChatPanel(panelBody, {
         status: createBackupStatus("identity-missing", "无法识别当前聊天", current.reason),
+        chatUnavailable:true,
         meta: null,
         messages: [],
         pending: [],
@@ -187,6 +188,7 @@ export function createPanelController({
           fullMessages,
         });
         renderCurrentChatPanel(panelBody, {
+          chatEmpty:current.chat.length===0,
           onCreateSnapshot,
           summary,
           status: readFailures.get(current.identity.chatKey) ?? getLatestStatus(),

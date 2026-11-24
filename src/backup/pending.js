@@ -17,6 +17,9 @@ const SKIP_PENDING_EVENTS = new Set([
   "settings-enabled-changed",
   "settings-limit-changed",
   "settings-recent-enabled-changed",
+  'restore-complete',
+  'snapshot-restored',
+  'storage-recovery-complete',
 ]);
 
 export function createPendingRecords({ chat, chatKey, eventName, args = [], now = new Date().toISOString() }) {
@@ -74,7 +77,7 @@ export function createMessageRecord({ chatKey, messageIndex, kind, message, now 
 }
 
 export function summarizePendingChanges(records) {
-  const safeRecords = Array.isArray(records) ? records : [];
+  const safeRecords = (Array.isArray(records) ? records : []).filter(row=>row.pendingType!=='message_part');
   const numericIndexes = safeRecords
     .map((record) => record.messageIndex)
     .filter((value) => Number.isInteger(value))
@@ -85,7 +88,7 @@ export function summarizePendingChanges(records) {
       count: safeRecords.length,
       firstIndex: null,
       lastIndex: null,
-      rangeText: safeRecords.length ? "已备份这次改动" : "",
+      rangeText: safeRecords.length ? `改动记录，共 ${safeRecords.length} 项` : "",
     };
   }
 
@@ -96,7 +99,7 @@ export function summarizePendingChanges(records) {
     count: safeRecords.length,
     firstIndex,
     lastIndex,
-    rangeText: formatPendingRange(firstIndex, lastIndex),
+    rangeText: safeRecords.some(row=>!Number.isInteger(row.messageIndex))?`改动记录，共 ${safeRecords.length} 项`:formatPendingRange(firstIndex, lastIndex),
   };
 }
 
@@ -109,13 +112,15 @@ export function formatPendingRange(firstIndex, lastIndex = firstIndex) {
   const lastFloor = Number.isInteger(lastIndex) ? lastIndex : firstFloor;
 
   if (firstFloor === lastFloor) {
-    return `已备份第 ${firstFloor} 层`;
+    return `改动记录：第 ${firstFloor} 层`;
   }
 
-  return `已备份第 ${firstFloor} 层到第 ${lastFloor} 层`;
+  return `改动记录：第 ${firstFloor}–${lastFloor} 层`;
 }
 
 export function inferPendingKind(eventName = "") {
+  if(eventName==='message_swipe_deleted')return 'swipe_change';
+  if(eventName==='message_reasoning_deleted')return 'message_edit';
   if (eventName.includes("deleted")) {
     return eventName.includes("message") ? "message_delete" : "structural_change";
   }
@@ -136,7 +141,8 @@ export function inferPendingKind(eventName = "") {
 }
 
 export function inferMessageIndex(eventName = "", args = [], chatLength = 0) {
-  const numberArg = args.find((value) => Number.isInteger(Number(value)));
+  const values=args.map(value=>value&&typeof value==='object'?value.messageId:value);
+  const numberArg = values.find(value => (typeof value==='number'||typeof value==='string'&&value.trim())&&Number.isInteger(Number(value)));
   if (numberArg !== undefined) {
     const index = Number(numberArg);
     if (eventName.includes("generation") && index === chatLength && chatLength > 0) {

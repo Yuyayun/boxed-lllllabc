@@ -65,7 +65,7 @@ export function createIndexedDbBackupBatches({ openDatabase }) {
                     if (indexedDB.cmp(cursor.primaryKey, after) < 0) { cursor.continuePrimaryKey(chatKey, after); return 'jumped'; }
                     return;
                   }
-                  const row = cursor.value, value = hashesOnly ? { messageIndex: row.messageIndex, canonicalHash: row.canonicalHash, hashVersion: row.hashVersion } : row;
+                  const row = cursor.value, value = hashesOnly ? { messageIndex: row.messageIndex, canonicalHash: row.canonicalHash, hashVersion: row.hashVersion, nativeHash: row.nativeHash } : row;
                   const size = boundedRecordSize(value); if (!size.fits) throw backupFailure('单条备份超过安全上限。', 'backup-limit');
                   if (rows.length && (rows.length >= BACKUP_BUDGET.rows || bytes + size.bytes > BACKUP_BUDGET.bytes || nodes + size.nodes > BACKUP_BUDGET.nodes)) { more = true; return false; }
                   rows.push(value); last = cursor.primaryKey; bytes += size.bytes; nodes += size.nodes;

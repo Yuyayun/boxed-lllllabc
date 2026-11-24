@@ -21,7 +21,7 @@
         <section class="boxed-lllllabc-extension-meta" aria-label="扩展版本与信息">
           <div class="boxed-lllllabc-extension-meta-line">
             <div class="boxed-lllllabc-extension-meta-copy">
-              <span id="boxed-lllllabc-version">Ver 1.0.4</span>
+              <span id="boxed-lllllabc-version">Ver 1.0.5</span>
               <span class="boxed-lllllabc-meta-separator" aria-hidden="true"></span>
               <button
                 id="boxed-lllllabc-info-toggle"
@@ -78,6 +78,10 @@
             <button id="boxed-lllllabc-switch-storage" class="menu_button boxed-lllllabc-action-button" type="button" disabled><i class="fa-solid fa-right-left" aria-hidden="true"></i><span>切换备份位置</span></button>
           </div>
           <p id="boxed-lllllabc-transfer-result" role="status"></p>
+          <div id="boxed-lllllabc-storage-recovery" hidden role="status">
+            <p class="boxed-lllllabc-storage-help">上次存储操作的完成状态仍待核对，箱装备份写入暂时暂停。酒馆聊天和扩展更新可以使用；暂停期间的新改动暂不会由箱装备份。</p>
+            <button id="boxed-lllllabc-resume-storage" class="menu_button boxed-lllllabc-action-button" type="button"><i class="fa-solid fa-rotate" aria-hidden="true"></i><span>继续处理存储操作</span></button>
+          </div>
         <div class="boxed-lllllabc-storage-overview" aria-labelledby="boxed-lllllabc-storage-title">
           <div class="boxed-lllllabc-storage-heading">
             <strong id="boxed-lllllabc-storage-title">浏览器本地存储状态</strong>

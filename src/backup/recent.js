@@ -4,6 +4,7 @@ import { defaultBackupStorage } from "../storage/service.js";
 import { readBackupRecords, writeBackupRecords } from '../storage/backup-batches.js';
 import { createBackupStatus } from './status.js';
 import { backupFailureStatus } from './failure-status.js';
+import { nativeChatHash } from './native-content.js';
 export { createBackupStatus } from './status.js';
 
 export async function refreshRecentBackup({ contextReader, settings, reason = "unknown", triggers = [], storage = defaultBackupStorage }) {
@@ -35,6 +36,7 @@ export async function refreshRecentBackup({ contextReader, settings, reason = "u
     recentCount: messages.length,
     recentFirstIndex: messages[0]?.messageIndex ?? null,
     recentLastIndex: messages.at(-1)?.messageIndex ?? null,
+    recentNativeHash: nativeChatHash(messages.map(message=>message.raw)),
     lastReason: reason,
   };
 

@@ -12,6 +12,7 @@ import { createStorageController } from "./src/controllers/storage-controller.js
 import { createUpdateController } from "./src/controllers/update-controller.js";
 import { createContextReader } from "./src/context.js";
 import { registerBackupEvents } from "./src/events.js";
+import { saveNativeChatSnapshot } from './src/backup/native-save.js';
 import { registerPageLifecycle } from "./src/lifecycle.js";
 import { createPageReloadScheduler } from "./src/reload.js";
 import { createBackupStatus } from "./src/backup/recent.js";
@@ -75,6 +76,7 @@ const transferCoordinator = createTransferCoordinator({
   },
   resume: async () => {
     await backupStorage.refresh();
+    backupCoordinator?.resetObservation();
     operationGate.resume(); backupEvents?.resume(); switchUi?.close();
   },
   progress: (message) => switchUi?.progress(message),
@@ -96,6 +98,26 @@ let storageController = null;
 let updateController = null;
 let updateCheckTimer = null;
 let latestStatus = createBackupStatus("idle", "未初始化");
+let restoreRunning=false;
+async function runRestoreGuard(operation) {
+  if(restoreRunning||operationGate.isPaused())throw new Error('另一项恢复或存储操作正在进行，请稍后再试。');
+  if(isGenerating())throw new Error('请先停止生成，再执行恢复。');
+  restoreRunning=true;
+  let lease,paused=false,result;
+  try {
+    lease=await backupStorage.open();
+    if(operationGate.isPaused())throw new Error('备份位置正在切换，请稍后再恢复。');
+    await backupEvents?.pause();
+    await operationGate.pause();paused=true;
+    backendVerifier?.clearScheduledVerification();await backendVerifier?.whenIdle();
+    if(isGenerating())throw new Error('检测到生成已开始，恢复尚未执行。');
+    result=await operation();return result;
+  } finally {
+    if(paused)operationGate.resume();
+    backupEvents?.resume();lease?.close();restoreRunning=false;
+    if(result?.changed)try{await runBackupNow({eventName:'restore-complete',args:[],verifyNow:true});}catch(error){console.warn('[boxed-lllllabc] 恢复后的保存核对待重试',error);}
+  }
+}
 const pageReloadScheduler = createPageReloadScheduler({
   beforeReload: async () => {
     backendVerifier?.clearScheduledVerification();
@@ -154,7 +176,10 @@ function initializeControllers() {
   });
 
   restoreController = createRestoreController({
-    runGuard: operationGate.run,
+    runGuard: runRestoreGuard,
+    saveChatSnapshot:saveNativeChatSnapshot,
+    getSourceEpoch:()=>backupCoordinator.getSourceEpoch(),
+    onRestored:()=>backupCoordinator.resetObservation(),
     storage: backupStorage,
     getContextReader,
     getSettings,
@@ -196,13 +221,16 @@ function initializeControllers() {
   });
 
   snapshotController = createSnapshotController({
+    getSettings,
+    restoreGuard:runRestoreGuard,
+    saveChatSnapshot:saveNativeChatSnapshot,
+    onApplied:()=>backupCoordinator.resetObservation(),
     storage: backupStorage, getContextReader, runGuard: operationGate.run, isGenerating,
     beforeRestore: async () => {
       await backupEvents?.pause(); backendVerifier?.clearScheduledVerification(); await backendVerifier?.whenIdle();
     },
     afterRestore: async () => {
-      backupEvents?.resume();
-      await runBackupNow({ eventName: "snapshot-restored", args: [], verifyNow: true });
+      backupCoordinator.resetObservation();
     },
   });
 
@@ -336,17 +364,19 @@ jQuery(async () => {
   bindUpdateAction(() => updateController.requestUpdate());
   updateCheckTimer = setTimeout(() => updateController.checkOnce(), 3000);
   ensureStatusLine({
-    onOpenPanel: () => panelController.toggleCurrentChatPanel(),
+    onOpenPanel: () => storageRecoveryPending?switchUi?.showRecovery():panelController.toggleCurrentChatPanel(),
     getDisplayMode: () => getSettings().statusDisplayMode,
     getMessageCentered: () => getSettings().statusMessageCentered,
   });
   ensureMagicWandEntry();
 
   backupEvents = registerBackupEvents({
-    onObserved: () => backupCoordinator.noteSourceChange(),
+    onObserved: () => {backupCoordinator.noteSourceChange();backendVerifier?.clearScheduledVerification();},
+    captureTrigger: trigger=>backupCoordinator.captureTrigger(trigger),
     eventSource,
     eventTypes: event_types,
     onChatRenamed: async (trigger) => {
+      await backupCoordinator.persistCapturedTriggers(trigger.precedingTriggers??[]);
       await operationGate.run(() => backupCoordinator.handleChatRenamed(trigger.args));
     },
     onBackupNeeded: async (trigger) => {
@@ -354,6 +384,7 @@ jQuery(async () => {
       await panelController.refreshVisiblePanel();
     },
   });
+  backupCoordinator.resetObservation();
   pageLifecycle = registerPageLifecycle({
     flushBackupEvents: () => backupEvents?.flush(),
     onResume: async () => {
@@ -367,11 +398,21 @@ jQuery(async () => {
 
   runtimeLogUi=createRuntimeLogUi({storage:adapters.sqlite});
   switchUi = createStorageSwitchUi({
+    onRecoveryPending:async(pending,error)=>{
+      if(pending){
+        storageRecoveryPending=true;backendVerifier?.clearScheduledVerification();
+        await backupEvents?.pause();await operationGate.pause();
+        setStatus(createBackupStatus('db-error','备份存储待恢复（备份暂停）',error));
+      }else if(storageRecoveryPending&&!(await backupStorage.refresh()).journal){
+        storageRecoveryPending=false;operationGate.resume();backupCoordinator.resetObservation();backupEvents?.resume();
+      }
+    },
     canReadLogs:()=>runtimeLogUi.available(),onLogs:()=>runtimeLogUi.open(),
     control: storageControl, sqlite: adapters.sqlite, coordinator: transferCoordinator, isGenerating,
     afterChange: async () => {
-      await backupStorage.refresh();
+      const state=await backupStorage.refresh();if(state.journal)return;
       if (storageRecoveryPending) {
+        operationGate.resume();backupCoordinator.resetObservation();backupEvents?.resume();
         setStatus(await runBackupNow({ eventName: "storage-recovery-complete", args: [] }));
         storageRecoveryPending = false;
       }
@@ -387,7 +428,7 @@ jQuery(async () => {
     storageRecoveryPending = true;
     await operationGate.pause();
     await switchUi.failure(error);
-    setStatus(createBackupStatus("db-error", "存储操作待恢复"));
+    setStatus(createBackupStatus("db-error", "备份存储待恢复（备份暂停）",error));
     return;
   }
   setStatus(await runBackupNow({ eventName: "extension-loaded", args: [] }));

@@ -60,6 +60,7 @@ export function createCurrentChatStorageText(snapshot = {}, currentChatBytes = 0
 }
 
 export function openStorageWarningDialog({ snapshot = {}, onManage } = {}) {
+  const compatibility=snapshot.failure?.type==='compatibility';
   document.getElementById(WARNING_DIALOG_ID)?.remove();
   const dialog = document.createElement("div");
   dialog.id = WARNING_DIALOG_ID;
@@ -76,7 +77,7 @@ export function openStorageWarningDialog({ snapshot = {}, onManage } = {}) {
   header.className = "boxed-lllllabc-dialog-header";
   const title = document.createElement("strong");
   title.id = "boxed-lllllabc-storage-warning-title";
-  title.textContent = snapshot.pressure === "error" ? "本次备份没有写入成功" : "本地存储空间偏紧";
+  title.textContent = compatibility?snapshot.failure.shortText:snapshot.pressure === "error" ? "本次备份没有写入成功" : "本地存储空间偏紧";
   const close = createButton("", "fa-solid fa-xmark", "关闭");
   header.append(title, close);
 
@@ -85,14 +86,14 @@ export function openStorageWarningDialog({ snapshot = {}, onManage } = {}) {
   const message = document.createElement("p");
   message.textContent = snapshot.failure?.detail || pressureMessage(snapshot);
   const reassurance = document.createElement("p");
-  reassurance.textContent = "扩展不会自动删除已有备份。你可以进入管理清理，逐个聊天、逐种类型确认处理。";
+  reassurance.textContent = compatibility?'已有备份已保留，不需要清理浏览器站点数据。':'扩展不会自动删除已有备份。你可以进入管理清理，逐个聊天、逐种类型确认处理。';
   body.append(message, reassurance);
 
   const footer = document.createElement("footer");
   footer.className = "boxed-lllllabc-storage-warning-footer";
   const later = createButton("稍后处理", "menu_button boxed-lllllabc-action-button");
   const manage = createButton("管理清理", "menu_button boxed-lllllabc-action-button");
-  footer.append(later, manage);
+  footer.append(later);if(!compatibility)footer.append(manage);
   frame.append(header, body, footer);
   dialog.append(backdrop, frame);
   document.body.append(dialog);

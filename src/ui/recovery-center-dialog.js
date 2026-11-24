@@ -18,7 +18,7 @@ export function buildRecoveryCenterModel({
     disabledReason,
     pending: {
       count: pendingCount,
-      available: !disabledReason && Boolean(pendingPlan?.totalCount) && !pendingPlan?.blockedReason,
+      available: !disabledReason && Boolean(pendingPlan?.totalCount || pendingPlan?.canResave) && !pendingPlan?.blockedReason,
       reason: disabledReason || pendingPlan?.blockedReason || "当前没有可恢复的未保存变更。",
     },
     recent: {
@@ -89,6 +89,7 @@ export function openRecoveryCenterDialog({
       icon: "fa-shield-halved",
       title: "未保存变更",
       meta: model.pending.count ? `共 ${model.pending.count} 项` : "当前为空",
+      preview: model.pending.count ? '已保留恢复记录；酒馆可能已经保存，完成保存核对和备份补全后才会清除记录。' : '',
       available: model.pending.available,
       reason: model.pending.reason,
       onPreview: () => openPreview(onPreviewPending),
@@ -194,10 +195,13 @@ function renderSource({ icon, title, meta, preview = "", available, reason, extr
     section.append(previewElement);
   }
   if (extra) section.append(extra);
-  if (!available) section.append(renderReason(reason));
-  const action = createTextButton("fa-magnifying-glass", "预览恢复", onPreview);
+  let reasonElement;
+  if (!available) {
+    reasonElement=renderReason(reason);reasonElement.id=`${RECOVERY_DIALOG_ID}-reason-${icon}`;section.append(reasonElement);
+  }
+  const action = createTextButton("fa-magnifying-glass", available?"预览恢复":"暂不可恢复", onPreview);
   action.disabled = !available;
-  if (!available) action.title = reason;
+  if (!available) {action.title = reason;action.setAttribute('aria-describedby',reasonElement.id);}
   section.append(action);
   return section;
 }
@@ -225,9 +229,17 @@ function renderReason(text) {
   return reason;
 }
 
-function openPreview(callback) {
-  closeRecoveryCenterDialog();
-  return callback?.();
+async function openPreview(callback) {
+  const dialog=document.getElementById(RECOVERY_DIALOG_ID);
+  if(dialog?.getAttribute('aria-busy')==='true')return;
+  const actions=[...(dialog?.querySelectorAll('button')??[])],disabled=actions.map(button=>button.disabled);
+  dialog?.setAttribute('aria-busy','true');
+  actions.forEach(button=>{button.disabled=true;});
+  try {
+    const result=await callback?.();
+    if(result?.ok!==false)closeRecoveryCenterDialog();
+  }catch(error){globalThis.toastr?.error?.(error.message,'箱装辣白菜');}
+  finally{dialog?.removeAttribute('aria-busy');actions.forEach((button,index)=>{button.disabled=disabled[index];});}
 }
 
 function createIconButton(iconName, label, onClick) {

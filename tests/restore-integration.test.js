@@ -13,7 +13,7 @@ import {
 
 const chatKey = "character:1:chat-a";
 
-test("recent 恢复按修改、pending、渲染、保存的顺序执行一次", async () => {
+test("recent 恢复先追加保护记录，再修改、渲染和保存", async () => {
   const chat = makeChat(2);
   const calls = [];
   const plan = createRecentRestorePlan({
@@ -29,7 +29,7 @@ test("recent 恢复按修改、pending、渲染、保存的顺序执行一次", 
     readCurrent: async () => ({ ok: true, chat, identity: { chatKey } }),
     readPending: async () => [],
     writePending: async (records) => {
-      calls.push(["pending", chat.length, records[0].message.text]);
+      calls.push(["pending", chat.length, records.find(row=>row.pendingType==='message_part').raw.mes]);
     },
     render: async () => calls.push(["render", chat.length]),
     save: async () => calls.push(["save", chat.length]),
@@ -39,7 +39,7 @@ test("recent 恢复按修改、pending、渲染、保存的顺序执行一次", 
   assert.equal(result.ok, true);
   assert.equal(chat[2].mes, "恢复消息");
   assert.deepEqual(calls, [
-    ["pending", 3, "恢复消息"],
+    ["pending", 2, "恢复消息"],
     ["render", 3],
     ["save", 3],
   ]);
@@ -73,7 +73,7 @@ test("recent 写 pending 失败时回滚且不渲染不保存", async () => {
   assert.equal(saved, 0);
 });
 
-test("pending 来源恢复不重复写 pending", async () => {
+test("pending 来源恢复追加独立恢复证明并保留原记录", async () => {
   const chat = makeChat(1);
   const pending = [makePending(1, "丢失楼层")];
   const plan = createPendingRestorePlan({ chat, chatKey, pending });
@@ -90,7 +90,8 @@ test("pending 来源恢复不重复写 pending", async () => {
   });
 
   assert.equal(result.ok, true);
-  assert.equal(writes, 0);
+  assert.equal(writes, 1);
+  assert.equal(result.pendingRecords.find(row=>row.pendingType==='operation').supersedes[0].id,pending[0].id);
   assert.equal(saves, 1);
   assert.equal(chat[1].mes, "丢失楼层");
 });
@@ -160,7 +161,7 @@ test("保存等待超时后恢复仍视为成功并保留后台核对线索", as
   assert.equal(chat[1].mes, "丢失楼层");
 });
 
-test("历史楼层恢复按替换、pending、渲染、保存的顺序执行", async () => {
+test("历史楼层恢复先保护，再替换、渲染和保存", async () => {
   const chat = makeChat(2);
   const calls = [];
   const plan = createHistoricalRestorePlan({
@@ -179,7 +180,7 @@ test("历史楼层恢复按替换、pending、渲染、保存的顺序执行", a
     plan,
     readCurrent: async () => ({ ok: true, chat, identity: { chatKey } }),
     readPending: async () => [],
-    writePending: async (records) => calls.push(["pending", records[0].messageIndex, records[0].message.text]),
+    writePending: async (records) => calls.push(["pending", chat[0].mes, records.find(row=>row.pendingType==='message_part').raw.mes]),
     render: async () => calls.push(["render", chat[0].mes]),
     save: async () => calls.push(["save", chat[0].mes]),
   });
@@ -187,13 +188,13 @@ test("历史楼层恢复按替换、pending、渲染、保存的顺序执行", a
   assert.equal(result.ok, true);
   assert.equal(chat[0].mes, "历史第 0 层");
   assert.deepEqual(calls, [
-    ["pending", 0, "历史第 0 层"],
+    ["pending", "当前 0", "历史第 0 层"],
     ["render", "历史第 0 层"],
     ["save", "历史第 0 层"],
   ]);
 });
 
-test("完整聊天恢复先替换 pending，再修改聊天、重绘和保存", async () => {
+test("完整聊天恢复先追加保护，保留原 pending，再修改、重绘和保存", async () => {
   const chat = makeChat(2);
   const calls = [];
   const plan = createFullRestorePlan({
@@ -207,8 +208,8 @@ test("完整聊天恢复先替换 pending，再修改聊天、重绘和保存", 
     plan,
     readCurrent: async () => ({ ok: true, chat, identity: { chatKey } }),
     readPending: async () => [],
-    writePending: async () => { throw new Error("不应调用增量 pending 写入"); },
-    replacePending: async (records) => calls.push(["pending", chat.length, records[0].chatLength]),
+    writePending: async (records) => calls.push(["pending", chat.length, records.find(row=>row.pendingType==='operation').afterLength]),
+    replacePending: async () => {throw new Error('不能替换原 pending');},
     render: async () => calls.push(["render", chat.length, chat[0].mes]),
     save: async () => calls.push(["save", chat.length]),
   });
@@ -238,8 +239,8 @@ test("完整聊天保护写入失败时不修改、不重绘、不保存", async
     plan,
     readCurrent: async () => ({ ok: true, chat, identity: { chatKey } }),
     readPending: async () => [],
-    writePending: async () => {},
-    replacePending: async () => { throw new Error("数据库写保护失败"); },
+    writePending: async () => { throw new Error("数据库写保护失败"); },
+    replacePending: async () => {throw new Error('不能替换原 pending');},
     render: async () => { rendered += 1; },
     save: async () => { saved += 1; },
   });

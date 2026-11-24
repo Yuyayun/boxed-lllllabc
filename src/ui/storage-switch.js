@@ -20,15 +20,26 @@ export function supervisorProgressText(state){
   const status=['no-progress','unresponsive','unavailable'].includes(state.state)?labels[state.state]:legacyName??stages[state.stage]??labels[state.state];
   return `${status??'正在等待服务器'}${Number.isSafeInteger(state.count)?'；本阶段已处理 '+state.count+' 条':''}${Number.isSafeInteger(state.verified)?'；已读回核对 '+state.verified+' 条':''}；${state.state==='initializing'?'准备存储已用':'当前任务已用'} ${Math.floor((state.elapsedMs??0)/1000)} 秒。存活报告不表示核验完成。`;
 }
-export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerating = () => false, afterChange = async () => {},canReadLogs=()=>false,onLogs=()=>{} }) {
+export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerating = () => false, afterChange = async () => {},canReadLogs=()=>false,onLogs=()=>{},onRecoveryPending=async()=>{} }) {
   let modal;
   let progressText;
   let pausing = false;
   let operationKind = 'switch', operationTo;
   let monitorText;
   let resultSelector = '#boxed-lllllabc-transfer-result';
+  let recoveryPending=false,recoveryError;
   const text = (selector, value) => { const node = document.querySelector(selector); if (node) node.textContent = value; };
   function close() { modal?.close(); modal?.remove(); modal = null; }
+  async function markRecovery(pending,error) {
+    recoveryPending=pending;if(error)recoveryError=error;
+    const notice=document.querySelector('#boxed-lllllabc-storage-recovery');if(notice)notice.hidden=!pending;
+    await onRecoveryPending(pending,error);
+  }
+  function dismissRecovery() {
+    if(coordinator.isBusy?.())return;
+    close();document.querySelector('#boxed-lllllabc-resume-storage')?.focus();
+  }
+  async function showRecovery() { await failure(recoveryError??new Error('需要核对上次存储操作是否已经完成。')); }
   function frame(title) {
     close(); modal = document.createElement('dialog'); modal.id = 'boxed-lllllabc-transfer-dialog';
     modal.setAttribute('aria-labelledby','boxed-lllllabc-transfer-title');
@@ -42,12 +53,12 @@ export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerati
     if(!actions){actions=document.createElement('div');actions.className='boxed-lllllabc-transfer-actions';modal.append(actions);}
     const node=document.createElement('button');node.type='button';node.className='menu_button';node.textContent=label;node.addEventListener('click',onClick);actions.append(node);return node;
   }
-  function block(message = '正在等待已有操作结束，请勿关闭页面。', { running = true, kind, abandoning, title = abandoning?(kind==='clear'?'正在撤销清空':'正在撤销迁移'):kind==='clear'?'正在清空原位置备份':kind==='switch'?'正在切换备份位置':'正在处理备份存储操作' } = {}) {
+  function block(message = '正在等待已有操作结束，请勿关闭页面。', { running = true,dismissible=false, kind, abandoning, title = abandoning?(kind==='clear'?'正在撤销清空':'正在撤销迁移'):kind==='clear'?'正在清空原位置备份':kind==='switch'?'正在切换备份位置':'正在处理备份存储操作' } = {}) {
     pausing = false;
     const node = frame(title); progressText.textContent=message;
     node.setAttribute('aria-busy', String(running));
     progressText.tabIndex=0;
-    node.addEventListener('cancel',(event)=>event.preventDefault());
+    node.addEventListener('cancel',(event)=>{event.preventDefault();if(dismissible)dismissRecovery();});
     node.addEventListener('keydown',(event)=>{
       event.stopPropagation();
       if(event.key==='Tab') {
@@ -58,7 +69,7 @@ export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerati
       }
     });
     node.addEventListener('keyup',(event)=>event.stopPropagation());
-    const boundary=document.createElement('small'); boundary.textContent='当前页面已锁定。其他插件或外部程序直接修改聊天无法完全拦截；检测到当前聊天变化会停止提交。'; node.append(boundary);
+    const boundary=document.createElement('small'); boundary.textContent=dismissible?'箱装备份写入仍暂停。关闭提示后可以操作酒馆或更新扩展；任务登记和当前进度会继续保留。':'当前页面已锁定。其他插件或外部程序直接修改聊天无法完全拦截；检测到当前聊天变化会停止提交。'; node.append(boundary);
     monitorText=document.createElement('small');monitorText.hidden=true;node.append(monitorText);
     if(canReadLogs())button('查看运行日志',onLogs);
     if (running && coordinator.requestPause && coordinator.canPause?.()!==false) {
@@ -99,7 +110,8 @@ export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerati
     operationKind=state?.journal?.kind??operationKind;operationTo=state?.journal?.to??operationTo;
     resultSelector=operationKind==='clear'?'#boxed-lllllabc-clear-result':'#boxed-lllllabc-transfer-result';text(resultSelector,error.message);
     if (pending) {
-      block(`${error.message}\n备份操作保持暂停。继续时会先核对登记和实际内容，不会自动选择其他存储位置。`, { running:false, title:error.code==='paused'?(operationKind==='clear'?'清空已暂停':'迁移已暂停'):(operationKind==='clear'?'恢复清空旧位置':'恢复存储操作') });
+      await markRecovery(true,error);
+      block(`${error.message}\n备份写入暂时暂停。此提示不代表备份还没搬完；继续后会先核对。`, { running:false,dismissible:true, title:error.code==='paused'?(operationKind==='clear'?'清空已暂停':'迁移已暂停'):'核对上次存储操作' });
       if(state?.journal?.version===3 && state.journal.kind==='switch' && !state.journal.manifest) {
         const note=document.createElement('p');note.textContent='来源清单尚未完成。若无法证明来源未变，将撤销本次任务并保留两端原备份。';modal.append(note);
       }
@@ -110,14 +122,15 @@ export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerati
       if (state?.journal?.version===3 && ['working','committing'].includes(state.journal.phase) && coordinator.abandon) {
         button(operationKind==='clear'?'放弃本次清空':'放弃本次迁移',()=>confirmAbandon());
       }
-    } else close();
+      button('暂时关闭（备份仍暂停）',dismissRecovery);
+    } else {await markRecovery(false);close();}
   }
   async function completed(result,kind,to) {
     const state=await refresh();
     text(resultSelector,result?.cancelled ? result.reason || '已放弃本次迁移，原位置现有备份和目标原正式备份已保留。'
       : result?.ok ? kind==='clear' ? `原存储位置“${names[to]}”的备份已清空并完成校验。` : `已切换至${names[state.active]}。原位置的备份仍然保留。`
       : `已完成核对，当前使用${names[state.active]}。`);
-    await afterChange(); close();
+    await afterChange();await markRecovery(false);close();
   }
   function confirmAbandon() {
     const clearing=operationKind==='clear';
@@ -154,9 +167,10 @@ export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerati
     submit.disabled=true; check.addEventListener('change',()=>{submit.disabled=!check.checked;}); cancel.focus();
   }
   function bind() {
+    document.querySelector('#boxed-lllllabc-resume-storage')?.addEventListener('click',()=>showRecovery().catch(failure));
     document.querySelector('#boxed-lllllabc-switch-storage')?.addEventListener('click',()=>confirm('switch').catch(failure));
     document.querySelector('#boxed-lllllabc-clear-inactive')?.addEventListener('click',()=>confirm('clear').catch(failure));
     document.querySelector('#boxed-lllllabc-check-storage')?.addEventListener('click',()=>{ resultSelector='#boxed-lllllabc-transfer-result'; refresh().then(afterChange).catch(failure); });
   }
-  return { bind, refresh, block, close, failure,monitor(state){const message=supervisorProgressText(state);if(monitorText?.isConnected){monitorText.textContent=message;monitorText.hidden=!message;}else if(state.state==='initializing')text('#boxed-lllllabc-sqlite-state',message);},progress(message) { if (progressText) progressText.textContent=pausing?`${message}\n已请求暂停，将在当前步骤结束后停下。`:message; } };
+  return { bind, refresh, block, close, failure,showRecovery,hasPendingRecovery:()=>recoveryPending,monitor(state){const message=supervisorProgressText(state);if(monitorText?.isConnected){monitorText.textContent=message;monitorText.hidden=!message;}else if(state.state==='initializing')text('#boxed-lllllabc-sqlite-state',message);},progress(message) { if (progressText) progressText.textContent=pausing?`${message}\n已请求暂停，将在当前步骤结束后停下。`:message; } };
 }

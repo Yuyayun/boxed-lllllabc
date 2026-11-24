@@ -6,6 +6,7 @@ export function registerBackupEvents({
   onBackupNeeded,
   onChatRenamed,
   onObserved = () => {},
+  captureTrigger,
   debounceMs = DEFAULT_DEBOUNCE_MS,
 }) {
   const eventNames = pickEventNames(eventTypes);
@@ -71,7 +72,7 @@ export function registerBackupEvents({
     queuedTriggers = [];
     queuedRun = queuedRun
       .then(async () => {
-        await onChatRenamed?.(trigger);
+        await onChatRenamed?.({ ...trigger, precedingTriggers });
         await onBackupNeeded({
           eventName: "batched",
           args: [],
@@ -89,6 +90,10 @@ export function registerBackupEvents({
       const handler = (...args) => {
         const trigger = { eventName, args };
         onObserved(trigger);
+        if(captureTrigger) {
+          try { trigger.capture=captureTrigger(trigger); }
+          catch(error) { trigger.captureFailure=error?.message||String(error); }
+        }
         if (renameEventName && eventName === renameEventName) {
           return enqueueRename(trigger);
         }

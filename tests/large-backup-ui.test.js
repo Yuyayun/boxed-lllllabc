@@ -34,6 +34,6 @@ test('恢复保护写入期间来源变化，不覆盖用户的新内容', async
   const current = { ok: true, identity: { chatKey: 'chat' }, chat: [{ mes: 'before' }] };
   const plan = createFullRestorePlan({ chat: current.chat, chatKey: 'chat', fullMessages: [canonicalizeMessage({ mes: 'backup' }, 0)], pending: [] });
   let rendered = false, writes = 0;
-  const result = await executeRestorePlan({ plan, readCurrent: () => current, readPending: async () => [], replacePending: async () => { if (++writes === 1) current.chat[0].mes = 'user changed'; }, render: async () => { rendered = true; }, save: async () => {} });
+  const result = await executeRestorePlan({ plan, readCurrent: () => current, readPending: async () => [], writePending: async () => { if (++writes === 1) current.chat[0].mes = 'user changed'; }, render: async () => { rendered = true; }, save: async () => {} });
   assert(!result.ok); assert(!rendered); assert.equal(current.chat[0].mes, 'user changed');
 });

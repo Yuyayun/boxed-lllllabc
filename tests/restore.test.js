@@ -29,14 +29,14 @@ test("pending 全量恢复同时生成同楼层替换和连续尾部追加", () 
   assert.equal(plan.totalCount, 4);
 });
 
-test("pending 结构变化会阻止整次恢复", () => {
+test("pending 结构记录缺少证明时保留并说明原因", () => {
   const plan = createPendingRestorePlan({
     chat: makeChat(2),
     chatKey,
     pending: [{ id: `${chatKey}:structural`, chatKey, messageIndex: null, kind: "structural_change" }],
   });
 
-  assert.match(plan.blockedReason, /聊天结构变化/);
+  assert.match(plan.blockedReason, /缺少.*校验依据.*保留/);
 });
 
 test("pending 缺少当前下一层或尾部断层时阻止恢复", () => {

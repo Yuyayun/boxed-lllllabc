@@ -1,7 +1,10 @@
-import { hashCanonicalChat, stableStringify } from "./canonicalize.js";
+import { canonicalizeMessage, hashCanonicalChat, stableStringify } from "./canonicalize.js";
 import { createMessageRecord, createStructuralPendingRecord } from "./pending.js";
+import { recoverPendingTarget } from './pending-recovery.js';
+import { nativeChatHash, sameNativeChat,nativeMessageHash,nativeMessageText,cacheNativeHash,sha256Text } from './native-content.js';
+import { pendingRecordFingerprint } from './pending-journal.js';
 
-export function createPendingRestorePlan({ chat, chatKey, pending }) {
+export function createPendingRestorePlan({ chat, chatKey, pending, recent = [], full = [], historical = [],chatIntegrity }) {
   const safeChat = Array.isArray(chat) ? chat : [];
   const records = sortPending(pending);
   const base = createPlanBase({
@@ -11,13 +14,18 @@ export function createPendingRestorePlan({ chat, chatKey, pending }) {
     pending: records,
     pendingScopeIndexes: null,
   });
+  if(chatIntegrity!==undefined)base.baseIntegrity=chatIntegrity;
+  if(chatIntegrity!==undefined&&records.some(row=>row.chatIntegrity&&row.chatIntegrity!==chatIntegrity))return blockPlan(base,'聊天文件身份已经变化，不能直接合并这些保护记录；原数据已保留。');
 
   if (!records.length) {
     return blockPlan(base, "没有可恢复的未保存变更。");
   }
+  if(records.some(row=>row?.chatKey!==chatKey||Number.isInteger(row.messageIndex)&&(row.messageIndex<0||!Number.isSafeInteger(row.messageIndex))))return blockPlan(base,'未保存变更的聊天归属或楼层信息无效，原数据已保留。');
 
   if (records.some((record) => !Number.isInteger(record?.messageIndex))) {
-    return blockPlan(base, "未保存变更包含聊天结构变化，无法安全自动恢复。");
+    const result = recoverPendingTarget({chat:safeChat,chatKey,pending:records,recent,full,historical});
+    if(!result.ok)return blockPlan(base,result.reason);
+    return {...createTargetPlan(base,safeChat,result.targetChat,result.coveredIds),...(result.targetMetadata?{targetMetadata:result.targetMetadata,targetSnapshotSaveProof:result.targetSnapshotSaveProof,targetMetadataHash:sha256Text(nativeMessageText(result.targetMetadata))}:{})};
   }
 
   if (hasDuplicateIndexes(records)) {
@@ -171,11 +179,11 @@ export function createFullRestorePlan({ chat, chatKey, fullMessages, pending }) 
     return blockPlan(base, "完整聊天备份缺少完整消息，无法安全恢复。");
   }
 
-  const targetChat = records.map((record) => cloneValue(record.raw));
+  const targetChat = records.map((record) => {const raw=cloneValue(record.raw);cacheNativeHash(raw,nativeMessageText(record.raw),nativeMessageHash(record.raw));return raw;});
   const overlapLength = Math.min(safeChat.length, records.length);
   const replacements = [];
   for (let index = 0; index < overlapLength; index += 1) {
-    if (hashCanonicalChat([safeChat[index]]) !== hashCanonicalChat([targetChat[index]])) {
+    if (!sameNativeChat([safeChat[index]],[targetChat[index]])) {
       replacements.push(toRestoreItem(index, records[index]));
     }
   }
@@ -191,6 +199,7 @@ export function createFullRestorePlan({ chat, chatKey, fullMessages, pending }) 
     return blockPlan({
       ...base,
       targetChat,
+      targetNativeHash:nativeChatHash(targetChat),
       baseBackupHash: hashCanonicalChat(targetChat),
     }, "当前聊天已经与完整聊天备份一致。");
   }
@@ -198,6 +207,7 @@ export function createFullRestorePlan({ chat, chatKey, fullMessages, pending }) 
   return finishPlan({
     ...base,
     targetChat,
+    targetNativeHash:nativeChatHash(targetChat),
     baseBackupHash: hashCanonicalChat(targetChat),
     pendingConflicts: sortPending(pending),
   }, {
@@ -220,6 +230,9 @@ export function validateRestorePlan({ plan, chat, chatKey, pending }) {
   if (safeChat.length !== plan.baseChatLength || hashCanonicalChat(safeChat) !== plan.baseChatHash) {
     return invalid("当前聊天内容已经变化，请重新预览。");
   }
+  if(plan.baseNativeHash && nativeChatHash(safeChat)!==plan.baseNativeHash)return invalid('当前聊天内容已经变化，请重新预览。');
+  if(plan.targetNativeHash && nativeChatHash(plan.targetChat)!==plan.targetNativeHash)return invalid('恢复目标已经变化，请重新预览。');
+  if(plan.targetMetadataHash&&sha256Text(nativeMessageText(plan.targetMetadata))!==plan.targetMetadataHash)return invalid('待恢复的聊天设置已经变化，请重新预览。');
 
   const pendingHash = hashPendingRecords(pending, plan.pendingScopeIndexes);
   if (pendingHash !== plan.basePendingHash) {
@@ -227,6 +240,7 @@ export function validateRestorePlan({ plan, chat, chatKey, pending }) {
       ? "相关未保存变更已经变化，请重新预览。"
       : "未保存变更已经变化，请重新预览。");
   }
+  if(plan.targetItemsHash&&restoreItemsHash(plan)!==plan.targetItemsHash)return invalid('恢复消息副本已经变化，请重新预览。');
 
   if ([...plan.replacements, ...plan.appends].some((item) => !hasRestorableRaw(item?.backup))) {
     return invalid("恢复数据已经变化，请重新预览。");
@@ -247,7 +261,7 @@ export function applyRestorePlan(chat, plan) {
     throw new TypeError("当前聊天不可修改。");
   }
 
-  const snapshot = plan.source === "full" ? {
+  const snapshot = Array.isArray(plan.targetChat) ? {
     fullChat: cloneValue(chat),
   } : {
     originalLength: chat.length,
@@ -258,7 +272,7 @@ export function applyRestorePlan(chat, plan) {
   };
 
   try {
-    if (plan.source === "full") {
+    if (Array.isArray(plan.targetChat)) {
       chat.splice(0, chat.length, ...cloneValue(plan.targetChat));
       return snapshot;
     }
@@ -340,6 +354,7 @@ function createPlanBase({ source, chat, chatKey, pending, pendingScopeIndexes })
     chatKey,
     baseChatLength: chat.length,
     baseChatHash: hashCanonicalChat(chat),
+    baseNativeHash: nativeChatHash(chat),
     basePendingHash: hashPendingRecords(pending, pendingScopeIndexes),
     pendingScopeIndexes,
     replacements: [],
@@ -355,7 +370,7 @@ function createPlanBase({ source, chat, chatKey, pending, pendingScopeIndexes })
 
 function finishPlan(base, { replacements, appends, deletions = [] }) {
   const indexes = [...replacements, ...appends, ...deletions].map((item) => item.messageIndex);
-  return {
+  const plan={
     ...base,
     replacements,
     appends,
@@ -364,6 +379,11 @@ function finishPlan(base, { replacements, appends, deletions = [] }) {
     lastIndex: indexes.length ? Math.max(...indexes) : null,
     totalCount: indexes.length,
   };
+  plan.targetItemsHash=restoreItemsHash(plan);return plan;
+}
+function restoreItemsHash(plan){return sha256Text(JSON.stringify([...plan.replacements,...plan.appends].map(item=>[item.messageIndex,nativeMessageHash(item.raw)])));}
+export function validateRestorePendingRecords(plan,pending) {
+  return hashPendingRecords(pending,plan.pendingScopeIndexes)===plan.basePendingHash;
 }
 
 function blockPlan(base, blockedReason) {
@@ -387,9 +407,9 @@ function hasRestorableRaw(backup) {
 
 function sortPending(records) {
   return [...(Array.isArray(records) ? records : [])].sort((a, b) => {
-    if (!Number.isInteger(a?.messageIndex)) return 1;
-    if (!Number.isInteger(b?.messageIndex)) return -1;
-    return a.messageIndex - b.messageIndex;
+    const left=Number.isInteger(a?.messageIndex)?a.messageIndex:Infinity,right=Number.isInteger(b?.messageIndex)?b.messageIndex:Infinity;
+    if(left!==right)return left-right;
+    return String(a?.id??'')<String(b?.id??'')?-1:String(a?.id??'')>String(b?.id??'')?1:0;
   });
 }
 
@@ -406,16 +426,18 @@ function hashPendingRecords(records, scopeIndexes) {
   const scope = Array.isArray(scopeIndexes) ? new Set(scopeIndexes) : null;
   const comparable = sortPending(records)
     .filter((record) => !scope || scope.has(record?.messageIndex))
-    .map((record) => ({
-      id: record?.id ?? "",
-      messageIndex: record?.messageIndex ?? null,
-      canonicalHash: record?.canonicalHash ?? "",
-      canonicalChatHash: record?.canonicalChatHash ?? "",
-      kind: record?.kind ?? "",
-      updatedAt: record?.updatedAt ?? "",
-      ...(record?.snapshotSaveProof ? { snapshotSaveProof: record.snapshotSaveProof } : {}),
-    }));
+    .map(record => [record?.id,pendingRecordFingerprint(record)]);
   return hashString(stableStringify(comparable));
+}
+
+function createTargetPlan(base,chat,targetChat,coveredIds) {
+  const replacements=[],appends=[],deletions=[];
+  targetChat.forEach((raw,messageIndex)=>{
+    if(messageIndex>=chat.length)appends.push({messageIndex,raw,backup:canonicalizeMessage(raw,messageIndex)});
+    else if(!sameNativeChat([chat[messageIndex]],[raw]))replacements.push({messageIndex,raw,backup:canonicalizeMessage(raw,messageIndex)});
+  });
+  for(let index=targetChat.length;index<chat.length;index++)deletions.push({messageIndex:index});
+  return finishPlan({...base,targetChat,targetNativeHash:nativeChatHash(targetChat),coveredPendingIds:coveredIds,canResave:coveredIds.length>0}, {replacements,appends,deletions});
 }
 
 function hashString(value) {

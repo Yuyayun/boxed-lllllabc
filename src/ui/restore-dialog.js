@@ -58,6 +58,7 @@ export function buildRestoreDialogModel({ plan, chatName, currentChat = [] }) {
     hasConflicts: plan.pendingConflicts.length > 0,
     replacesAllPending: plan.source === "full",
     totalCount: plan.totalCount,
+    targetCount: plan.targetChat?.length ?? plan.baseChatLength + plan.appends.length - (plan.deletions?.length??0),
     items,
   };
 }
@@ -166,7 +167,8 @@ function renderSummary(model) {
   if (model.deletionRange) {
     summary.append(renderSummaryLine("将删除", model.deletionRange));
   }
-  summary.append(renderSummaryLine("变更数量", `${model.totalCount} 层`));
+  summary.append(renderSummaryLine("恢复后", `共 ${model.targetCount} 层，按恢复后的顺序重新编号`));
+  summary.append(renderSummaryLine("变更数量", model.totalCount?`${model.totalCount} 层`:'内容已在当前页面，将重新请求酒馆保存'));
   return summary;
 }
 
@@ -178,10 +180,10 @@ function renderConflictWarning(model) {
   icon.setAttribute("aria-hidden", "true");
   const content = document.createElement("div");
   const title = document.createElement("strong");
-  title.textContent = "将覆盖现有未保存变更";
+  title.textContent = "恢复内容与现有改动记录重叠";
   const detail = document.createElement("div");
   detail.textContent = model.replacesAllPending
-    ? `全部 ${model.conflictCount} 条未保存记录会由本次整聊恢复保护记录取代。`
+    ? '将按完整备份恢复聊天。原有未保存记录会保留到恢复内容落盘并核对成功。'
     : `${model.conflictRange}与本次恢复重叠；其他未保存变更不会被修改。`;
   content.append(title, detail);
   warning.append(icon, content);
@@ -202,7 +204,7 @@ function renderRestoreItems(model) {
     row.append(heading, meta);
 
     if (item.conflictPreview) {
-      row.append(renderPreviewLine("现有未保存变更", item.conflictPreview, true));
+      row.append(renderPreviewLine("现有改动记录", item.conflictPreview, true));
     } else if (item.currentPreview) {
       row.append(renderPreviewLine("当前内容", item.currentPreview));
     }

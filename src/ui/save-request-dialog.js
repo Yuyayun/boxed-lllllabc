@@ -12,7 +12,7 @@ export function buildSaveRequestDialogModel({ chatName, pending }) {
     pendingRange: summary.rangeText || "当前没有待确认变更",
     hasPending,
     explanation: hasPending
-      ? "不会恢复、覆盖或删除任何备份，也不会立即清除未保存变更。确认酒馆聊天文件已保存后，才会自动清除。"
+      ? "只请求酒馆保存当前页面的聊天，不从备份恢复内容。改动记录可能对应已经保存的内容，完成保存核对和备份补全后才会清除。"
       : "不会恢复、覆盖或删除任何备份。保存请求完成后，会检查酒馆聊天文件是否与当前完整聊天一致。",
   };
 }
@@ -49,7 +49,7 @@ export function openSaveRequestDialog({ plan, chatName, pending, onConfirm }) {
   summary.className = "boxed-lllllabc-restore-summary";
   summary.append(
     renderSummaryLine("聊天名称", model.chatName),
-    renderSummaryLine("未保存变更", `${model.pendingRange} · 共 ${model.pendingCount} 项`),
+    renderSummaryLine("待确认改动", `${model.pendingRange} · 共 ${model.pendingCount} 项`),
   );
 
   const explanation = document.createElement("section");

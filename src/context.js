@@ -24,14 +24,14 @@ export function createContextReader({ getContext }) {
         };
       }
 
-      const chat = Array.isArray(context.chat) ? context.chat : [];
-      if (!chat.length) {
+      if (!Array.isArray(context.chat)) {
         return {
           ok: false,
-          reason: "当前没有可备份的聊天内容。",
+          reason: "当前聊天内容尚未就绪。",
           context,
         };
       }
+      const chat = context.chat;
 
       const identity = buildChatIdentity(context);
       if (!identity.ok) {

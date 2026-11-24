@@ -11,6 +11,7 @@ import { stableText } from '../../src/storage/value-digest.js';
 import { captureSnapshot } from '../../src/snapshots/model.js';
 import { snapshotBatches, readSnapshot } from '../../src/snapshots/service.js';
 import {emptyManifest} from '../../src/storage/transfer-format.js';
+import {createManagedStorage,createOperationGate} from '../../src/storage/managed.js';
 
 const assert=(value,message)=>{if(!value)throw new Error(message);};
 const request=value=>new Promise((resolve,reject)=>{value.onsuccess=()=>resolve(value.result);value.onerror=()=>reject(value.error);});
@@ -103,7 +104,25 @@ export function installRecoveryContract(nonce) {
     }
     expected.source=await peek(expected.from,0);sessionStorage.setItem('boxed-recovery-expected',JSON.stringify(encodeStorageValue(expected)));
   }
-  globalThis.recoveryContract={start,recover,uiCase,mutateSource,restartWorker:()=>rpc('restart-worker'),state:()=>control.read(),
+  async function workerFailureUiCase({reuse=false}={}) {
+    if(!reuse)await start('indexeddb','batch-verified');
+    stageToCrash=null;
+    const before=await control.read(),expected=decodeStorageValue(JSON.parse(sessionStorage.getItem('boxed-recovery-expected')));
+    const sourceBefore=await peek(expected.from,0),targetBefore=await peek(expected.to,0),gate=createOperationGate();await gate.pause();
+    let available=false;
+    const ports={...adapters,sqlite:{...adapters.sqlite,batchTransfer:(...args)=>{if(!available)throw Object.assign(new Error('SQLite 工作线程不可用，请检查日志后重启插件。'),{code:'database-unavailable'});return adapters.sqlite.batchTransfer(...args);}}};
+    coordinator=makeCoordinator(ports);
+    document.body.innerHTML='<main><textarea id="fixture-chat" aria-label="聊天输入"></textarea><button id="fixture-update">更新扩展</button><div id="boxed-lllllabc-storage-recovery" hidden><p>备份写入暂停</p><button id="boxed-lllllabc-resume-storage">继续处理存储操作</button></div><p id="boxed-lllllabc-transfer-result"></p><p id="boxed-lllllabc-clear-result"></p></main>';
+    globalThis.fixtureUpdateOpened=false;document.querySelector('#fixture-update').onclick=()=>{globalThis.fixtureUpdateOpened=true;};
+    ui=createStorageSwitchUi({control,sqlite:adapters.sqlite,coordinator,onRecoveryPending:pending=>{if(pending)return gate.pause();},afterChange:async()=>{gate.resume();globalThis.recoveryUiFinished=true;}});ui.bind();globalThis.recoveryUiFinished=false;
+    await ui.failure(Object.assign(new Error('存储操作待恢复：操作结果待恢复，备份保持锁定：SQLite 工作线程不可用，请检查日志后重启插件。'),{code:'recovery-required'}));
+    globalThis.recoveryFailure={
+      async inspect(){const state=await control.read();equal(await peek(expected.from,0),sourceBefore,'关闭失败提示改动了原位置数据');equal(await peek(expected.to,0),targetBefore,'关闭失败提示改动了目标原有数据');return {state,gatePaused:gate.isPaused(),unchanged:stableText(state)===stableText(before),normalBlocked:await createManagedStorage({control,adapters}).open().then(s=>{s.close();return false;},()=>true)};},
+      allowRecovery(){available=true;},
+    };
+    return {id:before.journal.id};
+  }
+  globalThis.recoveryContract={start,recover,uiCase,workerFailureUiCase,mutateSource,restartWorker:()=>rpc('restart-worker'),state:()=>control.read(),
     async operationUiCase(from,kind,scenario='success'){
       ui?.close();await reset(from);stageToCrash=null;pauseStage=null;coordinator=makeCoordinator();
       if(kind==='clear')await coordinator.switchTo(from==='indexeddb'?'sqlite':'indexeddb',{confirmed:true});

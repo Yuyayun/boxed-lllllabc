@@ -21,6 +21,9 @@ import { openSaveRequestDialog } from "../ui/save-request-dialog.js";
 import { readBackupRecords, readBackupBundle, writeBackupRecords } from '../storage/backup-batches.js';
 import { backupFailureStatus } from '../backup/failure-status.js';
 import { protectPendingRecord } from '../backup/pending-protection.js';
+import { summarizePendingChanges } from '../backup/pending.js';
+import { pendingRecordFingerprint,warmPendingRecords } from '../backup/pending-journal.js';
+import { nativeChatHash, sha256Text,warmNativeChat,nativeMessageText } from '../backup/native-content.js';
 
 export function createRestoreController({
   storage = defaultBackupStorage,
@@ -39,22 +42,40 @@ export function createRestoreController({
   saveRequestTimeoutMs = SAVE_REQUEST_TIMEOUT_MS,
   waitForSave = waitForSaveRequest,
   openSaveDialog = openSaveRequestDialog,
+  saveChatSnapshot,
+  getSourceEpoch = ()=>0,
+  onRestored = ()=>{},
+  preparePreview=async()=>{},
 }) {
+  function evidenceHash(plan,bundle) {
+    return sha256Text(JSON.stringify((plan.evidenceStores??[]).map(store=>[store,(bundle[store]??[])
+      .filter(row=>plan.source==='historical'?row.messageIndex===plan.replacements[0]?.messageIndex:plan.source==='recent'?plan.appends.some(item=>item.messageIndex===row.messageIndex):true)
+      .map(row=>[row.messageIndex,pendingRecordFingerprint(row)])])));
+  }
   function createRestoreUiState({ current, messages, fullMessages, historicalChanges, pending, meta, summary }) {
     if (summary) {
       const mode = storage.getMode?.();
       const load = async (action, argument) => {
         let session;
         try {
+          await preparePreview();
           const fresh = getContextReader().readCurrentChat();
           if (!fresh.ok || fresh.identity.chatKey !== current.identity.chatKey || storage.getMode?.() !== mode) throw new Error('聊天或备份位置已经变化，请重新打开面板。');
           session = await storage.open();
+          await warmNativeChat(fresh.chat);
           const full = action === 'onPreviewFull' || action === 'onOpenRecovery';
           const historical = action === 'onPreviewHistorical' || action === 'onOpenRecovery';
           const recent = action === 'onPreviewRecent' || action === 'onOpenRecovery';
           const stores = ['pending_changes', ...(full ? ['full_messages'] : []), ...(historical ? ['historical_changes'] : []), ...(recent ? ['recent_messages'] : [])];
-          const { records, summary: state } = await readBackupBundle(session, fresh.identity.chatKey, stores);
+          let { records, summary: state } = await readBackupBundle(session, fresh.identity.chatKey, stores);
+          if(action==='onPreviewPending'&&createPendingRestorePlan({chat:fresh.chat,chatKey:fresh.identity.chatKey,pending:records.pending_changes}).blockedReason) {
+            ({records,summary:state}=await readBackupBundle(session,fresh.identity.chatKey,['pending_changes','recent_messages','full_messages','historical_changes']));
+          }
           const loadedPending = records.pending_changes, loadedFull = records.full_messages ?? [], loadedHistorical = records.historical_changes ?? [], loadedRecent = records.recent_messages ?? [];
+          await warmNativeChat([...loadedPending.map(row=>row.raw??row.message?.raw),...loadedFull.map(row=>row.raw),...loadedHistorical.map(row=>row.message?.raw),...loadedRecent.map(row=>row.raw)].filter(Boolean));
+          await warmPendingRecords(loadedPending);
+          const latest=getContextReader().readCurrentChat();
+          if(!latest.ok||latest.identity.chatKey!==fresh.identity.chatKey||storage.getMode?.()!==mode)throw new Error('读取备份期间聊天或存储位置发生变化，请重新打开恢复。');
           const ui = createRestoreUiState({ current: fresh, messages: loadedRecent, fullMessages: loadedFull, historicalChanges: loadedHistorical, pending: loadedPending, meta: state.meta ?? meta });
           return ui[action]?.(argument);
         } catch (error) { const status = backupFailureStatus(error, '读取'); if (status.code === 'db-error') setStatus(status); globalThis.toastr?.error?.(status.detail, '箱装辣白菜'); return { ok: false, reason: status.detail }; }
@@ -65,11 +86,20 @@ export function createRestoreController({
         onOpenRecovery: () => load('onOpenRecovery'), onPreviewFull: () => load('onPreviewFull'),
         onPreviewRecent: index => load('onPreviewRecent', index), onPreviewHistorical: index => load('onPreviewHistorical', index), onPreviewPending: () => load('onPreviewPending') };
     }
-    const pendingPlan = createPendingRestorePlan({
+    let pendingPlan = createPendingRestorePlan({
       chat: current.chat,
       chatKey: current.identity.chatKey,
       pending,
+      chatIntegrity:current.identity.meta?.chatIntegrity,
     });
+    let pendingEvidence=[];
+    if(pendingPlan.blockedReason) {
+      pendingPlan=createPendingRestorePlan({chat:current.chat,chatKey:current.identity.chatKey,pending,recent:messages,full:fullMessages,historical:historicalChanges,chatIntegrity:current.identity.meta?.chatIntegrity});
+      pendingEvidence=['recent_messages','full_messages','historical_changes'];
+    }
+    pendingPlan.storageMode=storage.getMode?.();pendingPlan.evidenceStores=pendingEvidence;
+    pendingPlan.baseEvidenceHash=evidenceHash(pendingPlan,{recent_messages:messages,full_messages:fullMessages,historical_changes:historicalChanges});
+    if(pendingPlan.targetMetadata)pendingPlan.baseMetadataHash=sha256Text(nativeMessageText(current.context?.chatMetadata??{}));
     const recentOptions = createRecentRestoreOptions({
       chat: current.chat,
       recent: messages,
@@ -80,6 +110,8 @@ export function createRestoreController({
       fullMessages,
       pending,
     });
+    fullPlan.storageMode=storage.getMode?.();fullPlan.evidenceStores=['full_messages'];
+    fullPlan.baseEvidenceHash=evidenceHash(fullPlan,{full_messages:fullMessages});
     const saveRequestPlan = createSaveRequestPlan({
       chat: current.chat,
       chatKey: current.identity.chatKey,
@@ -117,7 +149,7 @@ export function createRestoreController({
           pending,
           endIndex,
         });
-        return showRestorePreview({ plan, current, meta });
+        return showRestorePreview({ plan, current, meta,evidence:{recent_messages:messages} });
       },
       onPreviewHistorical: (messageIndex) => {
         const plan = createHistoricalRestorePlan({
@@ -127,7 +159,7 @@ export function createRestoreController({
           pending,
           messageIndex,
         });
-        return showRestorePreview({ plan, current, meta });
+        return showRestorePreview({ plan, current, meta,evidence:{historical_changes:historicalChanges} });
       },
     };
   }
@@ -149,7 +181,7 @@ export function createRestoreController({
       state: {
         chatName,
         pendingPlan,
-        pendingCount: pending.length,
+        pendingCount: summarizePendingChanges(pending).count,
         recentOptions,
         recentMessages: messages,
         fullPlan,
@@ -166,7 +198,7 @@ export function createRestoreController({
           pending,
           endIndex,
         });
-        return showRestorePreview({ plan, current, meta });
+        return showRestorePreview({ plan, current, meta,evidence:{recent_messages:messages} });
       },
       onPreviewFull: () => showRestorePreview({ plan: fullPlan, current, meta }),
       onPreviewHistorical: (messageIndex) => {
@@ -177,7 +209,7 @@ export function createRestoreController({
           pending,
           messageIndex,
         });
-        return showRestorePreview({ plan, current, meta });
+        return showRestorePreview({ plan, current, meta,evidence:{historical_changes:historicalChanges} });
       },
     });
   }
@@ -192,11 +224,14 @@ export function createRestoreController({
     });
   }
 
-  function showRestorePreview({ plan, current, meta }) {
+  function showRestorePreview({ plan, current, meta,evidence }) {
+    if(evidence){plan.evidenceStores=Object.keys(evidence);plan.baseEvidenceHash=evidenceHash(plan,evidence);}
     if (plan.blockedReason) {
       globalThis.toastr?.warning?.(plan.blockedReason, "箱装辣白菜");
-      return;
+      return {ok:false,reason:plan.blockedReason};
     }
+    plan.storageMode??=storage.getMode?.();
+    plan.baseIntegrity??=current.identity.meta?.chatIntegrity;
 
     const chatName = buildVisibleChatSummary(meta)[0]?.value || "当前聊天";
     openRestoreDialog({
@@ -205,15 +240,38 @@ export function createRestoreController({
       currentChat: current.chat,
       onConfirm: (confirmedPlan) => confirmRestore(confirmedPlan),
     });
+    return {ok:true};
   }
 
   const confirmRestore = (plan) => runGuard(() => confirmRestoreImpl(plan)).catch((error) => ({ ok: false, reason: error.message }));
   async function confirmRestoreImpl(plan) {
     const contextReader = getContextReader();
+    const sourceEpoch=getSourceEpoch();
+    const readCurrent=()=>{
+      if(plan.storageMode!==undefined&&storage.getMode?.()!==plan.storageMode)return {ok:false,reason:'备份位置已经变化，请重新预览。'};
+      const live=contextReader.readCurrentChat();
+      if(live.ok&&plan.baseIntegrity!==undefined&&live.identity.meta?.chatIntegrity!==plan.baseIntegrity)return {ok:false,reason:'聊天文件身份已经变化，请重新预览，保护记录已保留。'};
+      return live;
+    };
     let pendingSummary;
     const result = await executeRestorePlan({
       plan,
-      readCurrent: () => contextReader.readCurrentChat(),
+      readCurrent,
+      afterApply:onRestored,
+      beforeApply: async()=>{
+        if(plan.targetMetadata) {
+          const metadata=readCurrent().context?.chatMetadata??{};
+          if(sha256Text(nativeMessageText(metadata))!==plan.baseMetadataHash||metadata.integrity!==plan.targetMetadata.integrity)throw new Error('聊天设置或文件身份已经变化，请重新预览，保护记录已保留。');
+        }
+        if(!plan.evidenceStores?.length)return;
+        const session=await storage.open();
+        try {
+          const bundle={};
+          if(session.capabilities?.boundedBackup)Object.assign(bundle,(await readBackupBundle(session,plan.chatKey,plan.evidenceStores)).records);
+          else for(const store of plan.evidenceStores)bundle[store]=await readBackupRecords(session,plan.chatKey,store);
+          if(evidenceHash(plan,bundle)!==plan.baseEvidenceHash)throw new Error('参与恢复的备份已经变化，请重新预览。');
+        } finally {session.close();}
+      },
       readPending: async chatKey => {
         if (plan.source !== 'full') return readCurrentPending(chatKey);
         const session = await storage.open();
@@ -223,22 +281,16 @@ export function createRestoreController({
       writePending: async (records) => {
         const session = await storage.open();
         try {
-          await writeBackupRecords(session, { chatKey: plan.chatKey, store: 'pending_changes', rows: records.map(record => protectPendingRecord(record, getSettings(), contextReader.readCurrentChat().chat.length)) });
-        } finally {
-          session.close();
-        }
-      },
-      replacePending: async (records) => {
-        const session = await storage.open();
-        try {
-          const receipt = await writeBackupRecords(session, { chatKey: plan.chatKey, store: 'pending_changes', rows: records.map(record => protectPendingRecord(record, getSettings(), record.chatLength ?? contextReader.readCurrentChat().chat.length)), replace: true, summary: pendingSummary });
-          if (receipt?.committedRevision !== undefined) pendingSummary = { ...pendingSummary, revision: receipt.committedRevision };
+          await writeBackupRecords(session, { chatKey: plan.chatKey, store: 'pending_changes', rows: records.map(record => protectPendingRecord(record, getSettings(), record.afterLength??readCurrent().chat?.length??0)),
+            sourceUnchanged:()=>{const live=readCurrent();return live.ok&&live.identity.chatKey===plan.chatKey&&getSourceEpoch()===sourceEpoch;},
+            validateSource:()=>{const live=readCurrent();return live.ok&&nativeChatHash(live.chat)===plan.baseNativeHash;} });
         } finally {
           session.close();
         }
       },
       render: renderRestoredMessages,
       save: async ({ current }) => {
+        if(saveChatSnapshot)return waitForSave({save:()=>saveChatSnapshot({current:readCurrent(),shouldContinue:()=>{const live=readCurrent();return live.ok&&live.identity.chatKey===plan.chatKey&&live.chat===current.chat;}}),timeoutMs:saveRequestTimeoutMs});
         if (typeof current.context?.saveChat !== "function") {
           throw new Error("当前酒馆版本没有提供聊天保存接口。");
         }
@@ -250,6 +302,7 @@ export function createRestoreController({
     });
 
     if (result.changed) {
+      onRestored();
       const restored = contextReader.readCurrentChat();
       if (restored.ok && restored.identity.chatKey === plan.chatKey) {
         await refreshBackupsAfterRestore({ current: restored, plan });
@@ -282,14 +335,15 @@ export function createRestoreController({
       return validation;
     }
 
-    if (typeof current.context?.saveChat !== "function") {
+    if (!saveChatSnapshot && typeof current.context?.saveChat !== "function") {
       const reason = "当前酒馆版本没有提供聊天保存接口。";
       globalThis.toastr?.error?.(reason, "箱装辣白菜");
       return { ok: false, reason };
     }
 
+    const saveNativeHash=nativeChatHash(current.chat),saveMode=storage.getMode?.();
     const saveOutcome = await waitForSave({
-      save: () => current.context.saveChat(),
+      save: () => saveChatSnapshot ? saveChatSnapshot({current,shouldContinue:()=>{const live=getContextReader().readCurrentChat();return live.ok&&storage.getMode?.()===saveMode&&live.identity.chatKey===plan.chatKey&&live.chat===current.chat&&nativeChatHash(live.chat)===saveNativeHash;}}) : current.context.saveChat(),
       timeoutMs: saveRequestTimeoutMs,
     });
     if (!saveOutcome.ok) {
@@ -362,8 +416,22 @@ export function createRestoreController({
 }
 
 export async function renderRestoredMessages({ current, plan }) {
+  const withoutExtra=current.chat.filter(message=>!Object.hasOwn(message,'extra'));
+  try {await renderNativeRestoredMessages({current,plan});}
+  finally {
+    // Native redraw initializes a missing extra to {} even when it has no
+    // content. Keep the protected JSON exact; never discard populated fields.
+    for(const message of withoutExtra)if(message.extra&&typeof message.extra==='object'&&!Array.isArray(message.extra)&&Object.keys(message.extra).length===0)delete message.extra;
+  }
+}
+
+async function renderNativeRestoredMessages({ current, plan }) {
   const context = current.context ?? {};
-  if (plan.source === "full") {
+  if(plan.targetMetadata) {
+    if(typeof context.updateChatMetadata!=='function')throw new Error('当前酒馆无法恢复聊天设置，保护记录已保留。');
+    context.updateChatMetadata(structuredClone(plan.targetMetadata),true);
+  }
+  if (plan.source==='full'||Array.isArray(plan.targetChat)) {
     if (typeof context.clearChat !== "function" || typeof context.printMessages !== "function") {
       throw new Error("当前酒馆版本无法完整重绘聊天。");
     }

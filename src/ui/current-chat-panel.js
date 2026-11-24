@@ -20,14 +20,18 @@ export function renderCurrentChatPanel(container, {
   onVerify,
   onCreateSnapshot,
   summary: backupSummary = null,
+  chatEmpty = false,
+  chatUnavailable = false,
 }) {
   const recentExpanded = container.dataset.recentExpanded === "true";
   container.replaceChildren();
 
   const summary = document.createElement("div");
   summary.className = "boxed-lllllabc-panel-summary";
+  if(chatUnavailable)summary.append(renderLine('当前聊天','当前未打开聊天'));
+  else if(chatEmpty)summary.append(renderLine('当前聊天','当前聊天为空'));
   summary.append(
-    renderLine("酒馆保存状态", status.shortText),
+    renderLine("保存与备份状态", status.shortText),
     renderLine("上次检查", formatDate(status.updatedAt)),
   );
   if (['backup-update-failed','backup-read-failed'].includes(status.code) && status.detail) summary.append(renderLine('本次操作', status.detail));
@@ -50,7 +54,7 @@ export function renderCurrentChatPanel(container, {
     container.append(historicalSection);
   }
   if (backupSummary?.counts.historical_changes) container.append(renderLine('历史楼层改动备份', `${backupSummary.counts.historical_changes} 条，进入恢复备份查看`));
-  if (backupSummary?.counts.pending_changes) container.append(renderLine('未保存变更', `${backupSummary.counts.pending_changes} 条，进入恢复备份查看`));
+  if (backupSummary?.counts.pending_changes) container.append(renderLine('待确认改动', '保存核对或备份补全尚未完成，进入恢复备份查看'));
   else container.append(renderPendingSection(pending, restore));
   container.append(renderBackupManagement(management));
 
@@ -272,7 +276,7 @@ function renderPendingSection(records, restore) {
 
   const title = document.createElement("div");
   title.className = "boxed-lllllabc-panel-title";
-  title.textContent = "未保存变更";
+  title.textContent = "待确认改动";
   section.append(title);
 
   if (!records.length) {
@@ -280,9 +284,11 @@ function renderPendingSection(records, restore) {
     return section;
   }
 
+  section.append(renderEmpty('这些记录还在等待保存核对或备份补全，不代表酒馆保存失败。'));
+
   const list = document.createElement("div");
   list.className = "boxed-lllllabc-pending-list";
-  for (const record of records) {
+  for (const record of records.filter(row=>row.pendingType!=='message_part')) {
     list.append(renderPendingPreview(record));
   }
   section.append(list);
@@ -295,7 +301,7 @@ function renderPendingSection(records, restore) {
   } else if (plan?.totalCount && typeof restore.onPreviewPending === "function") {
     section.append(renderRestoreAction({
       icon: "fa-clock-rotate-left",
-      label: "预览全量恢复",
+      label: "预览恢复",
       onClick: restore.onPreviewPending,
     }));
   }
@@ -402,7 +408,7 @@ function renderPendingPreview(record) {
   title.className = "boxed-lllllabc-recent-file-title";
   title.textContent = Number.isInteger(record.messageIndex)
     ? `第 ${record.messageIndex} 层 · ${renderPendingKind(record.kind)}`
-    : `聊天结构变化 · ${renderPendingKind(record.kind)}`;
+    : renderPendingKind(record.kind);
 
   const detail = document.createElement("span");
   detail.className = "boxed-lllllabc-recent-file-meta";
@@ -412,7 +418,8 @@ function renderPendingPreview(record) {
   text.className = "boxed-lllllabc-recent-file-preview";
   text.textContent = Number.isInteger(record.messageIndex)
     ? getMessagePreview(record.message || {})
-    : `已记录当前 ${record.chatLength ?? "全部"} 层的聊天结构`;
+    : record.pendingType==='operation'&&record.kind==='message_delete'?`已保护从第 ${record.deleteStartIndex} 层开始的 ${record.deleteCount} 层删除`
+      : '改动已记录，等待核对酒馆保存结果';
 
   main.append(title, detail, text);
   preview.append(main);
@@ -451,7 +458,7 @@ function renderPendingKind(kind) {
     case "restore":
       return "备份恢复";
     default:
-      return "结构变化";
+      return "聊天改动";
   }
 }
 

@@ -976,6 +976,12 @@
   border-left-color: color-mix(in srgb, currentColor 24%, transparent);
 }
 
+.boxed-lllllabc-recovery-source button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: none;
+}
+
 .boxed-lllllabc-recovery-source-header {
   display: flex;
   align-items: flex-start;

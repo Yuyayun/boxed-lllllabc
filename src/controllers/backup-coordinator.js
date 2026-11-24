@@ -7,6 +7,7 @@ import {
 import { hashCanonicalChat } from "../backup/canonicalize.js";
 import { createHistoricalRecord } from "../backup/historical.js";
 import { createPendingRecords, summarizePendingChanges } from "../backup/pending.js";
+import { createPendingObserver } from '../backup/pending-journal.js';
 import { createBackupStatus, refreshRecentBackup } from "../backup/recent.js";
 import { defaultBackupStorage } from "../storage/service.js";
 import { buildChatRenameIdentity, resolveChatRenameTarget } from "../identity.js";
@@ -50,6 +51,31 @@ export function createBackupCoordinator({
   const backupProblems = new Map();
   const backupRepairs = new Map();
   let sourceEpoch = 0, queuedBackup = Promise.resolve();
+  const observer=createPendingObserver({readCurrent:()=>getContextReader().readCurrentChat(),deferHashes:true});
+  const unwrittenCaptures=new Set();
+  async function persistCapturedTriggers(triggers) {
+    const settings=getSettings();
+    if(!settings.enabled)return;
+    const groups=new Map();
+    for(const trigger of [...[...unwrittenCaptures].map(capture=>({capture})),...triggers]) {
+      if(trigger.captureFailure)throw new Error(`无法捕获这次聊天改动：${trigger.captureFailure}`);
+      const captured=trigger.capture;
+      if(!captured?.records.length||captured.persisted)continue;
+      await captured.ready;
+      if(!groups.has(captured.chatKey))groups.set(captured.chatKey,[]);
+      if(!groups.get(captured.chatKey).includes(captured))groups.get(captured.chatKey).push(captured);
+    }
+    for(const [chatKey,captures] of groups) {
+      const session=await storage.open();
+      try {
+        await session.reconcileChatIdentity(captures[0].identity);
+        const rows=captures.flatMap(capture=>capture.records.map(row=>protectPendingRecord(row,settings,
+          capture.records.find(record=>record.pendingType==='operation')?.afterLength??row.chatLength??0)));
+        await writeBackupRecords(session,{chatKey,store:'pending_changes',rows});
+        captures.forEach(capture=>{capture.persisted=true;unwrittenCaptures.delete(capture);});
+      } finally {session.close();}
+    }
+  }
   function runBackupNow(trigger = {}) {
     const run = queuedBackup.then(() => runBackupNowImpl(trigger));
     queuedBackup = run.catch(() => {}); return run;
@@ -72,6 +98,8 @@ export function createBackupCoordinator({
     }
 
     await prepareBackup();
+    try { await persistCapturedTriggers(triggerList); }
+    catch(error) {const status=backupFailureStatus(error);setStatus(status);await refreshVisiblePanel();return status;}
     const contextReader = getContextReader();
     const current = contextReader.readCurrentChat();
     if (!current.ok) {
@@ -80,6 +108,9 @@ export function createBackupCoordinator({
       await refreshVisiblePanel();
       return status;
     }
+    if(!triggerList.some(item=>item.capture))observer.reset(current);
+    triggerList=triggerList.filter(item=>!item.capture||item.capture.chatKey===current.identity.chatKey);
+    if(!triggerList.length)triggerList=[{eventName:'chat_loaded',args:[]}];
 
     const legacyRenameStatus = await reconcileLegacyRename({ current, triggers: triggerList });
     if (legacyRenameStatus?.code === "db-error") {
@@ -101,7 +132,7 @@ export function createBackupCoordinator({
     try {
       const session = await storage.open();
       try {
-        const pendingRecords = triggerList.flatMap((item) => createPendingRecords({
+        const pendingRecords = triggerList.filter(item=>!item.capture).flatMap((item) => createPendingRecords({
           chat: current.chat,
           chatKey: current.identity.chatKey,
           eventName: item.eventName,
@@ -113,12 +144,6 @@ export function createBackupCoordinator({
         if (records.length) await writeBackupRecords(session, { chatKey: current.identity.chatKey, store: 'pending_changes', rows: records });
         if (session.capabilities?.boundedBackup || typeof session.getPendingChanges === 'function') {
           pendingForBackup = await readBackupRecords(session, current.identity.chatKey, 'pending_changes');
-          const legacy = pendingForBackup.filter(record => !Array.isArray(record.backupTargets)).map(record => protectPendingRecord(record, settings, current.chat.length));
-          if (legacy.length) {
-            await writeBackupRecords(session, { chatKey: current.identity.chatKey, store: 'pending_changes', rows: legacy });
-            const upgraded = new Map(legacy.map(record => [record.id, record]));
-            pendingForBackup = pendingForBackup.map(record => upgraded.get(record.id) ?? record);
-          }
         }
       } finally {
         session.close();
@@ -587,6 +612,14 @@ export function createBackupCoordinator({
       if (records.length && records.every(record => Number.isInteger(record.messageIndex) && Array.isArray(record.backupTargets))) { backupProblems.delete(records[0].chatKey); backupRepairs.delete(records[0].chatKey); }
     },
     noteSourceChange() { sourceEpoch++; },
+    getSourceEpoch: ()=>sourceEpoch,
+    captureTrigger: trigger=>{
+      if(!getSettings().enabled){observer.reset();return {records:[],chatKey:null};}
+      const captured=observer.capture(trigger);if(captured.records.length)unwrittenCaptures.add(captured);return captured;
+    },
+    resetObservation: ()=>observer.reset(),
+    persistCapturedTriggers,
+    whenIdle: ()=>queuedBackup,
     confirmFullBackupAfterBackendVerification,
     createDisplayStatus,
     handleChatRenamed,

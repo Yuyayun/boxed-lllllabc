@@ -2,6 +2,7 @@ import { canonicalizeMessage, hashCanonicalMessage } from './canonicalize.js';
 import { classifyTriggers } from './full.js';
 import { readBackupRecords, writeBackupRecords, backupFailure } from '../storage/backup-batches.js';
 import { stableText } from '../storage/value-digest.js';
+import { nativeMessageHash, nativeStateHash,warmNativeChat } from './native-content.js';
 
 const contentEvents = new Set(['message_sent','message_received','message_edited','message_updated','message_swiped','message_swipe_deleted','message_reasoning_edited','message_reasoning_deleted','generation_ended','generation_stopped']);
 export async function refreshBoundedFullBackup({ session, current, triggers, reason, backendConfirmed, sourceChatHash = null, views, readCurrent, epoch = () => 0 }) {
@@ -10,31 +11,39 @@ export async function refreshBoundedFullBackup({ session, current, triggers, rea
   if (info.onlyIgnoredFirstMessage) return null;
   const frozen = meta.fullBackupState === 'frozen', awaiting = meta.fullBackupState === 'awaiting-confirmation';
   const unknownTarget = triggers.some(trigger => /edited|updated|swiped|swipe_deleted|reasoning/.test(trigger.eventName) && !(trigger.args ?? []).some(value => (typeof value === 'number' || typeof value === 'string' && value.trim()) && Number.isSafeInteger(Number(value)) && Number(value) >= 0 && Number(value) < current.chat.length));
-  const trusted = !frozen && !awaiting && view?.count === count && view?.at === meta.fullBackupAt
+  const trusted = !frozen && !awaiting && view?.count === count && view?.at === meta.fullBackupAt && view?.nativeHashes?.length===count
     && triggers.length && triggers.every(trigger => contentEvents.has(trigger.eventName)) && !unknownTarget && !info.hasDelete && current.chat.length >= count;
   const observedEpoch = epoch(), length = current.chat.length;
   const unchanged = () => { const latest = readCurrent(); return epoch() === observedEpoch && latest.ok && latest.identity.chatKey === key && latest.chat.length === length; };
   const targets = new Set(info.targetIndexes);
   if (unknownTarget) targets.clear();
-  let source, replace = false;
+  let source, replace = false, nativeHashes;
   if (trusted) {
     for (let i = count; i < length; i++) targets.add(i);
     source = [...targets].sort((a, b) => a - b).map(index => ({ index, raw: structuredClone(current.chat[index]) }));
+    nativeHashes=view.nativeHashes.slice();
+    for(const item of source)nativeHashes[item.index]=nativeMessageHash(item.raw);
   } else {
     // Only reconciliation/replacement needs a complete stable source view.
     source = structuredClone(current.chat);
+    await warmNativeChat(source);
+    nativeHashes=source.map(nativeMessageHash);
     if (count) {
       const old = await readBackupRecords(session, key, 'full_messages', { hashesOnly: true, summary, retries: 0 });
+      if(old.some(row=>!row.nativeHash)) {
+        const copies=await readBackupRecords(session,key,'full_messages',{summary,retries:0});
+        copies.forEach((row,index)=>{old[index].nativeHash=nativeMessageHash(row.raw);});
+      }
       const live = readCurrent();
       if (!unchanged() || !source.every((row, index) => stableText(row) === stableText(live.chat[index]))) throw backupFailure('来源聊天在核对期间发生变化，已有备份已保留。', 'backup-source-changed');
       if (old.some((row, index) => row.messageIndex !== index)) throw backupFailure('完整备份楼层不连续，已有备份已保留。');
-      const differing = old.findIndex((row, index) => index >= length || row.canonicalHash !== hashCanonicalMessage(source[index]));
+      const differing = old.findIndex((row, index) => index >= length || row.nativeHash !== nativeHashes[index]);
       if (frozen && !(differing === -1 && length >= count) && !(backendConfirmed && meta.fullBackupIncident?.kind === 'unexpected-message-change' && length >= count)) return { code: 'full-frozen', shortText: '完整备份已暂停更新' };
       if (!info.hasDelete && length < count) {
         await session.updateChatMetaSummary(key, { fullBackupState: 'frozen', fullBackupIncident: { kind: 'unexpected-shorter-chat', detectedAt: new Date().toISOString(), backupMessageCount: count, observedMessageCount: length } });
         return { code: 'full-frozen', shortText: '完整备份已暂停更新' };
       }
-      const unexpected = old.findIndex((row, index) => index < length && !targets.has(index) && row.canonicalHash !== hashCanonicalMessage(source[index]));
+      const unexpected = old.findIndex((row, index) => index < length && !targets.has(index) && row.nativeHash !== nativeHashes[index]);
       if (!info.hasDelete && !backendConfirmed && !frozen && unexpected !== -1) {
         await session.updateChatMetaSummary(key, { fullBackupState: 'awaiting-confirmation', fullBackupPendingMessageCount: length, fullBackupIncident: { kind: 'unexpected-message-change', differingIndex: unexpected, previousCount: count, observedCount: length, detectedAt: new Date().toISOString() } });
         return { code: 'full-awaiting-confirmation', shortText: '完整备份待酒馆确认' };
@@ -47,11 +56,11 @@ export async function refreshBoundedFullBackup({ session, current, triggers, rea
     } else replace = true;
   }
   if (!unchanged()) throw backupFailure('来源聊天已经变化，已有备份已保留。', 'backup-source-changed');
-  if (!source.length && !replace && !sourceChatHash) { views.set(key, { count, at: meta.fullBackupAt }); return null; }
+  if (!source.length && !replace && !sourceChatHash && meta.fullBackupNativeHash===nativeStateHash(nativeHashes)) { views.set(key, { count, at: meta.fullBackupAt,nativeHashes }); return null; }
   const now = new Date().toISOString();
-  const patch = { fullBackupAt: now, fullBackupMessageCount: length, fullBackupFirstIndex: length ? 0 : null, fullBackupLastIndex: length ? length - 1 : null, fullBackupLastReason: reason, fullBackupState: 'active', fullBackupIncident: null, fullBackupPendingMessageCount: null, fullBackupChatHash: sourceChatHash };
+  const patch = { fullBackupAt: now, fullBackupMessageCount: length, fullBackupFirstIndex: length ? 0 : null, fullBackupLastIndex: length ? length - 1 : null, fullBackupLastReason: reason, fullBackupState: 'active', fullBackupIncident: null, fullBackupPendingMessageCount: null, fullBackupChatHash: sourceChatHash,fullBackupNativeHash:nativeStateHash(nativeHashes) };
   await writeBackupRecords(session, {
-    chatKey: key, store: 'full_messages', rows: source, mapRow: replace ? (raw, index) => canonicalizeMessage(raw, index, now) : item => canonicalizeMessage(item.raw, item.index, now), replace, meta: patch, summary,
+    chatKey: key, store: 'full_messages', rows: source, mapRow: replace ? (raw, index) => ({...canonicalizeMessage(raw, index, now),nativeHash:nativeHashes[index]}) : item => ({...canonicalizeMessage(item.raw, item.index, now),nativeHash:nativeHashes[item.index]}), replace, meta: patch, summary,
     sourceUnchanged: unchanged,
     validateSource: () => {
       if (!unchanged()) return false;
@@ -59,5 +68,5 @@ export async function refreshBoundedFullBackup({ session, current, triggers, rea
       return source.every((item, index) => stableText(replace ? item : item.raw) === stableText(live[replace ? index : item.index]));
     },
   });
-  views.set(key, { count: length, at: now }); return null;
+  views.set(key, { count: length, at: now,nativeHashes }); return null;
 }

@@ -8,17 +8,18 @@ import { readBackendChat } from "../verifier/backend-reader.js";
 import { stableText } from "../storage/value-digest.js";
 import { createSnapshotSaveProof } from "../snapshots/confirmation.js";
 import { readBackupRecords, writeBackupRecords } from '../storage/backup-batches.js';
+import {protectPendingRecord} from '../backup/pending-protection.js';
 
 export function createSnapshotController({ storage, getContextReader, runGuard = operation => operation(),
   isGenerating = () => false, beforeRestore = async () => {}, afterRestore = async () => {},
-  readBackend = readBackendChat, render = renderRestoredMessages, waitForSave = waitForSaveRequest } = {}) {
+  readBackend = readBackendChat, render = renderRestoredMessages, waitForSave = waitForSaveRequest,saveChatSnapshot, onApplied=()=>{},restoreGuard=runGuard,getSettings=()=>({}) } = {}) {
   let busy = false;
   const current = () => getContextReader().readCurrentChat();
   async function sessionUse(operation) { const session = await storage.open(); try { return await operation(session); } finally { session.close(); } }
-  async function guarded(operation) {
+  async function guarded(operation,restoring=false) {
     if (busy) throw new Error("已有聊天快照操作正在执行。");
     busy = true;
-    try { return await runGuard(operation); } finally { busy = false; }
+    try { return await (restoring?restoreGuard:runGuard)(operation); } finally { busy = false; }
   }
   const ensureStopped = () => { if (isGenerating()) throw new Error("请先停止生成，再操作聊天快照。"); };
   return {
@@ -72,8 +73,6 @@ export function createSnapshotController({ storage, getContextReader, runGuard =
               || await currentSnapshotFingerprint(source) !== preview.currentFingerprint) throw new Error("快照或当前聊天已变化，请重新预览。");
             const metadata = restoredMetadata(snapshot, source);
             const saveProof = await createSnapshotSaveProof(metadata);
-            let firstPendingWrite = true;
-            let writtenProtection = [];
             let pendingSummary;
             validateNativeSnapshotPayload(snapshot, metadata);
             for (const method of ["updateChatMetadata", "saveChat", "clearChat", "printMessages"]) if (typeof source.context?.[method] !== "function") throw new Error("当前酒馆缺少安全恢复接口，聊天保持原样。");
@@ -81,16 +80,15 @@ export function createSnapshotController({ storage, getContextReader, runGuard =
               plan: preview.plan,
               readCurrent: current,
               readPending: async key => { pendingSummary = session.capabilities?.boundedBackup ? await session.getBackupSummary(key) : undefined; return readBackupRecords(session, key, 'pending_changes', { summary: pendingSummary }); },
-              replacePending: async records => {
-                if (firstPendingWrite) {
-                  for (const record of records) { record.id = `${preview.plan.chatKey}:snapshot-restore`; record.snapshotSaveProof = saveProof; }
-                  writtenProtection = records;
-                  firstPendingWrite = false;
-                }
-                const receipt = await writeBackupRecords(session, { chatKey: preview.plan.chatKey, store: 'pending_changes', rows: records, replace: true, summary: pendingSummary });
+              writePending: async records => {
+                const settings=getSettings();if(settings.enabled)for(const record of records)Object.assign(record,protectPendingRecord(record,settings,snapshot.chat.length));
+                for (const record of records)if(record.pendingType==='operation'){record.snapshotSaveProof=saveProof;record.restoreMetadata=structuredClone(metadata);}
+                const receipt = await writeBackupRecords(session, { chatKey: preview.plan.chatKey, store: 'pending_changes', rows: records, summary: pendingSummary,
+                  sourceUnchanged:()=>current().identity?.chatKey===preview.plan.chatKey&&storage.getMode()===preview.mode });
                 if (receipt?.committedRevision !== undefined) pendingSummary = { ...pendingSummary, revision: receipt.committedRevision };
                 return receipt;
               },
+              afterApply:onApplied,
               beforeApply: async () => {
                 ensureStopped();
                 if (await currentSnapshotFingerprint(current()) !== preview.currentFingerprint) throw new Error("确认后聊天已变化，已取消恢复。");
@@ -106,7 +104,7 @@ export function createSnapshotController({ storage, getContextReader, runGuard =
               save: ({ current: target }) => waitForSave({ save: () => {
                 const latest = current();
                 if (!latest.ok || latest.identity.chatKey !== preview.plan.chatKey || !sameSnapshotContent(latest.chat, snapshot.chat) || !sameSnapshotContent(latest.context.chatMetadata ?? {}, metadata)) throw new Error("保存前目标聊天已变化，已停止请求酒馆保存。");
-                return target.context.saveChat();
+                return saveChatSnapshot?saveChatSnapshot({current:latest,shouldContinue:()=>current().identity?.chatKey===preview.plan.chatKey&&storage.getMode()===preview.mode}):target.context.saveChat();
               } }),
             });
             if (!result.changed) return result;
@@ -119,11 +117,12 @@ export function createSnapshotController({ storage, getContextReader, runGuard =
               return value.ok && value.identity.chatKey === preview.plan.chatKey && sameSnapshotContent(value.chat, snapshot.chat) && sameSnapshotContent(value.context.chatMetadata ?? {}, metadata);
             };
             const confirmedSave = result.stage !== "render" && verifyNativeSnapshotSave({ snapshot, metadata, backend }) && stillCurrent();
-            if (confirmedSave && writtenProtection.length) await session.deletePendingChangesIfUnchanged(writtenProtection, { shouldDelete: stillCurrent, signal: new AbortController().signal });
+            // The shared verifier checks the immutable target, metadata and
+            // required backup copies before conditionally retiring these rows.
             return { ...result, ok: confirmedSave, confirmed: confirmedSave, reason: confirmedSave ? "聊天快照已恢复，酒馆保存数据核对一致；源快照仍保留。" : result.stage === "render" ? result.reason : "聊天内容已应用，但酒馆保存尚未确认。未保存保护仍保留，请重新预览恢复或核对保存状态。" };
           });
         } finally { await afterRestore(); }
-      });
+      },true);
     },
   };
 }

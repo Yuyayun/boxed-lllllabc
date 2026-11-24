@@ -125,7 +125,7 @@ test("结构 pending 与后端不一致时继续保留", () => {
   assert.deepEqual(result.remaining, [record]);
 });
 
-test("旧版不可核对的结构 pending 在成功读取后端时清理", () => {
+test("旧版不可核对的结构 pending 在成功读取后端后仍保留", () => {
   const legacyRecord = {
     id: "character:1:chat-a:structural",
     chatKey: "character:1:chat-a",
@@ -135,8 +135,8 @@ test("旧版不可核对的结构 pending 在成功读取后端时清理", () =>
 
   const result = comparePendingWithBackend([legacyRecord], [{ mes: "后端消息" }]);
 
-  assert.deepEqual(result.confirmedIds, [legacyRecord.id]);
-  assert.deepEqual(result.remaining, []);
+  assert.deepEqual(result.confirmedIds, []);
+  assert.deepEqual(result.remaining, [legacyRecord]);
 });
 
 test("单人聊天后端请求去掉 jsonl 后缀", () => {

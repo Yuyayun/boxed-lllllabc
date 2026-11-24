@@ -61,7 +61,7 @@ export function createIndexedDbStorage({ openDatabase = database.openBackupDatab
     transfer: createIndexedDbTransfer({ openDatabase,onLegacyProgress }),
     async open() {
       const db = await openDatabase();
-      const session = { close: () => db.close(), capabilities: { boundedBackup: 1, pendingBackupProof: 1 }, ...backupBatches };
+      const session = { close: () => db.close(), capabilities: { boundedBackup: 1, pendingBackupProof: 1, pendingJournal: 1 }, ...backupBatches };
       for (const [name, operation] of Object.entries(OPERATIONS)) {
         session[name] = (...args) => operation(db, ...args);
       }

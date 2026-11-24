@@ -178,7 +178,7 @@ test("重新请求酒馆保存确认模型使用中文说明 pending 范围", ()
   assert.equal(model.title, "重新请求酒馆保存");
   assert.equal(model.chatName, "专用测试聊天");
   assert.equal(model.pendingCount, 2);
-  assert.equal(model.pendingRange, "已备份第 1 层到第 2 层");
+  assert.equal(model.pendingRange, "改动记录：第 1–2 层");
 });
 
 test("没有 pending 时仍提供请求酒馆保存并安排整聊后端核对", async () => {

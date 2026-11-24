@@ -79,6 +79,21 @@ try{
   const context=await browser.newContext(),page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.message));
   const url=`http://127.0.0.1:${server.address().port}/recovery-contract`;
   const load=async()=>{await page.goto(url);await page.waitForFunction(()=>!!globalThis.recoveryContract);};await load();
+  for(const viewport of [{width:1024,height:900},{width:390,height:760}]){
+    await page.setViewportSize(viewport);const original=await page.evaluate(()=>recoveryContract.workerFailureUiCase());
+    assert.equal(await page.getByRole('button',{name:'暂时关闭（备份仍暂停）',exact:true}).count(),1,'工作线程不可用时不能用不可关闭遮罩锁住酒馆');
+    if(process.env.BOXED_TEST_OUTPUT)await page.screenshot({path:path.join(process.env.BOXED_TEST_OUTPUT,`worker-unavailable-${viewport.width}.png`)});
+    await page.getByRole('button',{name:'暂时关闭（备份仍暂停）',exact:true}).click();assert.equal(await page.locator('#boxed-lllllabc-transfer-dialog').count(),0);
+    await page.locator('#fixture-chat').fill('遮罩关闭后仍可操作酒馆');await page.locator('#fixture-update').click();assert.equal(await page.evaluate(()=>fixtureUpdateOpened),true);
+    let state=await page.evaluate(()=>recoveryFailure.inspect());assert(state.unchanged&&state.gatePaused&&state.normalBlocked&&state.state.journal.id===original.id);
+    await page.locator('#boxed-lllllabc-resume-storage').click();await page.getByRole('button',{name:'继续核对并恢复',exact:true}).click();await page.getByRole('button',{name:'暂时关闭（备份仍暂停）',exact:true}).waitFor();
+    assert((await page.evaluate(()=>recoveryFailure.inspect())).state.journal);await page.getByRole('button',{name:'暂时关闭（备份仍暂停）',exact:true}).click();
+    await load();await page.evaluate(()=>recoveryContract.workerFailureUiCase({reuse:true}));await page.keyboard.press('Escape');assert.equal(await page.locator('#boxed-lllllabc-transfer-dialog').count(),0);
+    state=await page.evaluate(()=>recoveryFailure.inspect());assert(state.gatePaused&&state.normalBlocked&&state.state.journal.id===original.id);
+    await page.evaluate(()=>recoveryFailure.allowRecovery());await page.locator('#boxed-lllllabc-resume-storage').click();await page.getByRole('button',{name:'继续核对并恢复',exact:true}).click();await page.waitForFunction(()=>globalThis.recoveryUiFinished);
+    assert.equal((await page.evaluate(()=>recoveryContract.state())).journal,null);assert.equal(await page.locator('#boxed-lllllabc-storage-recovery').isVisible(),false);
+    uiChecks.push({viewport,workerFailureDismissed:true,locksRetained:true,reloadRetained:true,recovered:true});
+  }
   if(!process.env.BOXED_UI_ONLY){
   assert.equal(await page.evaluate(()=>recoveryContract.protocolMismatch()),true);
   assert.equal(await page.evaluate(()=>recoveryContract.controlSchemaTest()),true);

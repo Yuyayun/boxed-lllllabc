@@ -3,6 +3,8 @@ import { hashCanonicalChat, stripChatHeader } from "../backup/canonicalize.js";
 import { readBackendChat } from "../verifier/backend-reader.js";
 import { backupBatches } from '../storage/backup-batches.js';
 import { comparePendingWithBackend } from "../verifier/compare.js";
+import { nativeChatHash,warmNativeChat } from '../backup/native-content.js';
+import { warmPendingRecords } from '../backup/pending-journal.js';
 import { confirmSnapshotPending } from "../snapshots/confirmation.js";
 
 export function createBackendVerifier({
@@ -139,6 +141,8 @@ export function createBackendVerifier({
     }
 
     const pending = await readCurrentPending(chatKey);
+    await warmPendingRecords(pending);
+    await warmNativeChat(pending.map(row=>row.raw??row.message?.raw).filter(Boolean));
     if (!isCurrentRun(runId)) {
       return latestStatus();
     }
@@ -195,6 +199,8 @@ export function createBackendVerifier({
         });
       }
 
+      await warmNativeChat(stripChatHeader(backend.chat));
+      if(!isCurrentRun(runId))return latestStatus();
       const needsFullConfirmation = await needsFullBackupConfirmation(chatKey);
       if (!isCurrentRun(runId)) {
         return latestStatus();
@@ -206,16 +212,17 @@ export function createBackendVerifier({
         return latestStatus();
       }
       const backendMatchesCurrent = fullComparison
-        && hashCanonicalChat(stripChatHeader(backend.chat)) === hashCanonicalChat(latestCurrent.chat);
+        && nativeChatHash(stripChatHeader(backend.chat)) === nativeChatHash(latestCurrent.chat);
       const snapshotConfirmed = await confirmSnapshotPending(pending, backend.chat, getContextReader().readCurrentChat());
       if (!isCurrentRun(runId)) return latestStatus();
-      const comparison = comparePendingWithBackend(pending, backend.chat);
-      const confirmedIds = new Set(backendMatchesCurrent
-        ? pending.map((record) => record?.id).filter(Boolean)
-        : comparison.confirmedIds);
+      const comparison = comparePendingWithBackend(pending, backend.chat,{recentLimit:settings.recentLimit,snapshotIds:snapshotConfirmed});
+      const confirmedIds = new Set(comparison.confirmedIds);
+      const ranks=deletionRanks(pending);
       for (const id of snapshotConfirmed) confirmedIds.add(id);
       const confirmedRecords = pending.filter((record) => confirmedIds.has(record?.id) && (!record.snapshotSaveProof || snapshotConfirmed.has(record.id)))
-        .map(record => backendMatchesCurrent && !Number.isInteger(record.messageIndex) ? { ...record, verifiedFullChatHash: hashCanonicalChat(latestCurrent.chat) } : record);
+        .map(record => ({...record,...comparison.proofs?.get(record.id),
+          ...(!record.pendingFormat&&!Number.isInteger(record.messageIndex)&&confirmedIds.has(record.id)?{verifiedFullChatHash:hashCanonicalChat(stripChatHeader(backend.chat))}:{})}))
+        .sort((a,b)=>(ranks.get(a.id)??0)-(ranks.get(b.id)??0));
       let fullConfirmed = false;
       if (fullComparison && backendMatchesCurrent) {
         const confirmation = await enqueueEffect(runId, () => confirmFullBackup({ current: latestCurrent }));
@@ -526,6 +533,23 @@ export function createBackendVerifier({
     verifyBackendSnapshotNow,
     verifyBackendNow,
   };
+}
+
+function deletionRanks(records) {
+  const operations=new Map(records.filter(row=>row.pendingType==='operation').map(row=>[row.id,row]));
+  const ranks=new Map(),remaining=new Map(),parents=new Map(),queue=[];
+  for(const [id,row] of operations) {
+    const children=new Set((row.supersedes??[]).map(ref=>ref.id).filter(key=>operations.has(key)));
+    remaining.set(id,children.size);ranks.set(id,1);
+    if(!children.size)queue.push(id);
+    for(const child of children){if(!parents.has(child))parents.set(child,[]);parents.get(child).push(id);}
+  }
+  for(let i=0;i<queue.length;i++)for(const parent of parents.get(queue[i])??[]) {
+    ranks.set(parent,Math.max(ranks.get(parent),ranks.get(queue[i])+1));
+    remaining.set(parent,remaining.get(parent)-1);if(!remaining.get(parent))queue.push(parent);
+  }
+  for(const [id,count] of remaining)if(count)ranks.set(id,records.length+1);
+  return ranks;
 }
 
 async function deleteConfirmedPendingRecords(storage, records, shouldDelete, signal) {
