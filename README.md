@@ -2,11 +2,11 @@
 
 SillyTavern 聊天保存状态与备份扩展，帮助你查看备份、找回丢失或误改的聊天内容。
 
-**最新正式版：1.0.4** · [正式版下载](https://github.com/Yuyayun/boxed-lllllabc/releases/tag/v1.0.4)。修复身份核对和空操作误报“备份内容发生变化”的问题，让冻结完整备份可以稳定分页读取，并收窄恢复预览的读取范围。
+**最新正式版：1.0.5** · [正式版下载](https://github.com/Yuyayun/boxed-lllllabc/releases/tag/v1.0.5)。完善删除及连续修改后的恢复，核对实际保存结果，并改善空聊天、版本更新和存储故障提示。
 
 只安装前端就能使用浏览器本地备份（IndexedDB）。[服务器插件](https://github.com/Yuyayun/boxed-lllllabc-server)是可选组件；安装后仍由你决定是否切换位置，不会自动迁移，也不会同步两个位置的数据。
 
-**开发分支：1.0.5，尚未正式发布。** 本次完善删除记录和“恢复未保存变更”，详情见[实现与验收](docs/acceptance/2026-11-24-pending-recovery.md)。服务器备份需前后端一并使用 1.0.5；纯前端仍可独立工作。上面的正式版下载仍指向已经发布的 1.0.4。
+服务器备份请将前后端一并更新至 1.0.5；纯前端仍可独立工作。详情见[实现与验收](docs/acceptance/2026-11-24-pending-recovery.md)及[正式发布核对](docs/acceptance/release-1.0.5.md)。
 
 升级会保留现有备份和未保存记录。浏览器数据库版本升至 9，防止旧前端误改新版记录；同一浏览器升级后不能直接降回 1.0.4。SQLite schema 仍为 4，存储协议仍为 6，不需要清库或重新迁移。
 
@@ -14,7 +14,7 @@ SillyTavern 聊天保存状态与备份扩展，帮助你查看备份、找回�
 
 ## 安装与更新
 
-在酒馆的扩展安装入口输入本仓库地址，即可安装 main 上的正式版。也可以从正式发布页面下载 `boxed-lllllabc-v1.0.4.zip`，解压后将其中的 `boxed-lllllabc` 目录放到酒馆的：
+在酒馆的扩展安装入口输入本仓库地址，即可安装 main 上的正式版。也可以从正式发布页面下载 `boxed-lllllabc-v1.0.5.zip`，解压后将其中的 `boxed-lllllabc` 目录放到酒馆的：
 
 ```text
 public/scripts/extensions/third-party/boxed-lllllabc
@@ -32,7 +32,7 @@ git clone --branch main https://github.com/Yuyayun/boxed-lllllabc.git public/scr
 
 Git 安装的扩展可在其目录执行 `git pull --ff-only` 更新当前分支。使用 ZIP 更新时，先把旧代码目录移到扩展目录以外留存，再放入新目录，避免同时加载两份扩展。更新前结束生成和正在进行的存储操作，保留浏览器站点数据。
 
-使用服务器存储时，请将前端扩展与配套服务器插件一并更新至 1.0.4。无需清库或重新迁移备份；旧后端缺少保护能力时，会保留待确认记录并提示更新。浏览器本地备份仍可独立使用。
+使用服务器存储时，请将前端扩展与配套服务器插件一并更新至 1.0.5。无需清库或重新迁移备份；旧后端缺少保护能力时，会保留待确认记录并提示更新。浏览器本地备份仍可独立使用。
 
 ## 开始使用
 
@@ -121,7 +121,7 @@ Git 安装的扩展可在其目录执行 `git pull --ff-only` 更新当前分支
 
 本机已检查 SillyTavern 1.15.0、1.19.0，完成约 479 MB 级、超过 1 GiB 数据的往返、重启与旧版数据升级检查。手机 Termux、真实软键盘及 Safari 的结果不能由桌面测试代替。
 
-浏览器旧备份升级后仍留在浏览器，不自动迁往服务器。本版见[1.0.4 正式发布核对](docs/acceptance/release-1.0.4.md)及[正文版本回归修复验收](docs/acceptance/2026-11-21-backup-version-fix.md)；此前见[1.0.3 正式发布核对](docs/acceptance/release-1.0.3.md)、[1.0.2 超大聊天修复验收](docs/acceptance/2026-11-17-large-chat-backups.md)、[1.0.1 本机验收记录](docs/acceptance/1.0.1-desktop-acceptance.md)，手机步骤见[Termux 验收清单](docs/acceptance/1.0.1-termux-checklist.md)。
+浏览器旧备份升级后仍留在浏览器，不自动迁往服务器。本版见[1.0.5 正式发布核对](docs/acceptance/release-1.0.5.md)及[恢复实现与验收](docs/acceptance/2026-11-24-pending-recovery.md)；此前见[1.0.4 正式发布核对](docs/acceptance/release-1.0.4.md)、[1.0.3 正式发布核对](docs/acceptance/release-1.0.3.md)、[1.0.2 超大聊天修复验收](docs/acceptance/2026-11-17-large-chat-backups.md)、[1.0.1 本机验收记录](docs/acceptance/1.0.1-desktop-acceptance.md)，手机步骤见[Termux 验收清单](docs/acceptance/1.0.1-termux-checklist.md)。
 
 ## 开发记录与许可
 
