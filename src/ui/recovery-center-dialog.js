@@ -18,7 +18,7 @@ export function buildRecoveryCenterModel({
     disabledReason,
     pending: {
       count: pendingCount,
-      available: !disabledReason && Boolean(pendingPlan?.totalCount || pendingPlan?.canResave) && !pendingPlan?.blockedReason,
+      available: !disabledReason && (Boolean(pendingPlan?.selectionRequired)||Boolean(pendingPlan?.totalCount || pendingPlan?.canResave) && !pendingPlan?.blockedReason),
       reason: disabledReason || pendingPlan?.blockedReason || "当前没有可恢复的未保存变更。",
     },
     recent: {

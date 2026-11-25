@@ -294,7 +294,9 @@ function renderPendingSection(records, restore) {
   section.append(list);
 
   const plan = restore.pendingPlan;
-  if (plan?.blockedReason) {
+   if (plan?.selectionRequired && typeof restore.onPreviewPending === 'function') {
+     section.append(renderRestoreAction({icon:'fa-clock-rotate-left',label:'选择恢复内容',onClick:restore.onPreviewPending}));
+   } else if (plan?.blockedReason) {
     const blocked = renderEmpty(plan.blockedReason);
     blocked.classList.add("boxed-lllllabc-restore-blocked");
     section.append(blocked);

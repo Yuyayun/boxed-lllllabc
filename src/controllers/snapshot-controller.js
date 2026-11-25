@@ -9,10 +9,11 @@ import { stableText } from "../storage/value-digest.js";
 import { createSnapshotSaveProof } from "../snapshots/confirmation.js";
 import { readBackupRecords, writeBackupRecords } from '../storage/backup-batches.js';
 import {protectPendingRecord} from '../backup/pending-protection.js';
+import {recordRecoverySafely,newRecoveryLogId} from '../storage/recovery-log.js';
 
 export function createSnapshotController({ storage, getContextReader, runGuard = operation => operation(),
   isGenerating = () => false, beforeRestore = async () => {}, afterRestore = async () => {},
-  readBackend = readBackendChat, render = renderRestoredMessages, waitForSave = waitForSaveRequest,saveChatSnapshot, onApplied=()=>{},restoreGuard=runGuard,getSettings=()=>({}) } = {}) {
+  readBackend = readBackendChat, render = renderRestoredMessages, waitForSave = waitForSaveRequest,saveChatSnapshot, onApplied=()=>{},restoreGuard=runGuard,getSettings=()=>({}),recordRecovery=()=>{} } = {}) {
   let busy = false;
   const current = () => getContextReader().readCurrentChat();
   async function sessionUse(operation) { const session = await storage.open(); try { return await operation(session); } finally { session.close(); } }
@@ -76,11 +77,14 @@ export function createSnapshotController({ storage, getContextReader, runGuard =
             let pendingSummary;
             validateNativeSnapshotPayload(snapshot, metadata);
             for (const method of ["updateChatMetadata", "saveChat", "clearChat", "printMessages"]) if (typeof source.context?.[method] !== "function") throw new Error("当前酒馆缺少安全恢复接口，聊天保持原样。");
+            let recoveryId;
             const result = await executeRestorePlan({
               plan: preview.plan,
               readCurrent: current,
               readPending: async key => { pendingSummary = session.capabilities?.boundedBackup ? await session.getBackupSummary(key) : undefined; return readBackupRecords(session, key, 'pending_changes', { summary: pendingSummary }); },
               writePending: async records => {
+                const root=records.find(row=>row.pendingType==='operation');recoveryId=root?.operationId;
+                if(recoveryId)recordRecoverySafely(recordRecovery,{chatKey:preview.plan.chatKey,recoveryId,recoverySource:'snapshot',stage:'restore-started',targetCount:root.afterLength});
                 const settings=getSettings();if(settings.enabled)for(const record of records)Object.assign(record,protectPendingRecord(record,settings,snapshot.chat.length));
                 for (const record of records)if(record.pendingType==='operation'){record.snapshotSaveProof=saveProof;record.restoreMetadata=structuredClone(metadata);}
                 const receipt = await writeBackupRecords(session, { chatKey: preview.plan.chatKey, store: 'pending_changes', rows: records, summary: pendingSummary,
@@ -107,6 +111,8 @@ export function createSnapshotController({ storage, getContextReader, runGuard =
                 return saveChatSnapshot?saveChatSnapshot({current:latest,shouldContinue:()=>current().identity?.chatKey===preview.plan.chatKey&&storage.getMode()===preview.mode}):target.context.saveChat();
               } }),
             });
+            recordRecoverySafely(recordRecovery,{chatKey:preview.plan.chatKey,recoveryId:recoveryId??newRecoveryLogId(),recoverySource:'snapshot',stage:result.ok?'restore-submitted':result.changed?'restore-failed':'restore-blocked',
+              ...(result.ok?result.saveOutcome?.status==='timeout'?{errorCode:'restore-save-pending'}:{}:{errorCode:({pending:'restore-protection-failed',render:'restore-render-failed',save:'restore-save-unconfirmed'})[result.stage]??'restore-source-changed'})});
             if (!result.changed) return result;
             const target = current();
             let backend;

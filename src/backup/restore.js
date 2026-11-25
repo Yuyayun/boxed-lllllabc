@@ -24,8 +24,10 @@ export function createPendingRestorePlan({ chat, chatKey, pending, recent = [], 
 
   if (records.some((record) => !Number.isInteger(record?.messageIndex))) {
     const result = recoverPendingTarget({chat:safeChat,chatKey,pending:records,recent,full,historical});
-    if(!result.ok)return blockPlan(base,result.reason);
-    return {...createTargetPlan(base,safeChat,result.targetChat,result.coveredIds),...(result.targetMetadata?{targetMetadata:result.targetMetadata,targetSnapshotSaveProof:result.targetSnapshotSaveProof,targetMetadataHash:sha256Text(nativeMessageText(result.targetMetadata))}:{})};
+    if(result.needsChoice)return {...base,selectionRequired:true,blockedReason:result.reason,
+      branchChoices:result.choices.map(choice=>({id:choice.id??choice.targetHash,plan:recoveredTargetPlan(base,safeChat,choice)}))};
+    if(!result.ok)return {...blockPlan(base,result.reason),blockedCode:result.code};
+    return recoveredTargetPlan(base,safeChat,result);
   }
 
   if (hasDuplicateIndexes(records)) {
@@ -53,6 +55,17 @@ export function createPendingRestorePlan({ chat, chatKey, pending, recent = [], 
     replacements,
     appends: appendRecords.map((record) => toRestoreItem(record.messageIndex, record.message)),
   });
+}
+
+export function selectPendingRestoreBranch(plan,id) {
+  const choice=plan?.selectionRequired?plan.branchChoices?.find(choice=>choice.id===id):null;
+  if(!choice)return null;
+  return {...choice.plan,selectedBranchId:id,selectedBranchNumber:plan.branchChoices.indexOf(choice)+1,candidateCount:plan.branchChoices.length,storageMode:plan.storageMode,evidenceStores:plan.evidenceStores,
+    baseEvidenceHash:plan.baseEvidenceHash,baseIntegrity:plan.baseIntegrity};
+}
+
+function recoveredTargetPlan(base,chat,result){
+  return {...createTargetPlan(base,chat,result.targetChat,result.coveredIds),...(result.targetMetadata?{targetMetadata:result.targetMetadata,targetSnapshotSaveProof:result.targetSnapshotSaveProof,targetMetadataHash:sha256Text(nativeMessageText(result.targetMetadata))}:{})};
 }
 
 export function createRecentRestoreOptions({ chat, recent }) {

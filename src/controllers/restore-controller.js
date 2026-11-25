@@ -4,6 +4,8 @@ import {
   createHistoricalRestorePlan,
   createFullRestorePlan,
   createPendingRestorePlan,
+  selectPendingRestoreBranch,
+  validateRestorePlan,
   createRecentRestoreOptions,
   createRecentRestorePlan,
 } from "../backup/restore.js";
@@ -16,6 +18,7 @@ import {
 import { defaultBackupStorage } from "../storage/service.js";
 import { buildVisibleChatSummary } from "../ui/presentation.js";
 import { openRestoreDialog } from "../ui/restore-dialog.js";
+import { openLegacyBranchDialog } from '../ui/legacy-branch-dialog.js';
 import { openRecoveryCenterDialog } from "../ui/recovery-center-dialog.js";
 import { openSaveRequestDialog } from "../ui/save-request-dialog.js";
 import { readBackupRecords, readBackupBundle, writeBackupRecords } from '../storage/backup-batches.js';
@@ -24,6 +27,7 @@ import { protectPendingRecord } from '../backup/pending-protection.js';
 import { summarizePendingChanges } from '../backup/pending.js';
 import { pendingRecordFingerprint,warmPendingRecords } from '../backup/pending-journal.js';
 import { nativeChatHash, sha256Text,warmNativeChat,nativeMessageText } from '../backup/native-content.js';
+import {recordRecoverySafely,newRecoveryLogId} from '../storage/recovery-log.js';
 
 export function createRestoreController({
   storage = defaultBackupStorage,
@@ -46,12 +50,14 @@ export function createRestoreController({
   getSourceEpoch = ()=>0,
   onRestored = ()=>{},
   preparePreview=async()=>{},
+  recordRecovery=()=>{},
 }) {
   function evidenceHash(plan,bundle) {
     return sha256Text(JSON.stringify((plan.evidenceStores??[]).map(store=>[store,(bundle[store]??[])
       .filter(row=>plan.source==='historical'?row.messageIndex===plan.replacements[0]?.messageIndex:plan.source==='recent'?plan.appends.some(item=>item.messageIndex===row.messageIndex):true)
       .map(row=>[row.messageIndex,pendingRecordFingerprint(row)])])));
   }
+  const needsLegacyEvidence=rows=>rows.some(row=>!row.pendingFormat&&!Number.isInteger(row.messageIndex));
   function createRestoreUiState({ current, messages, fullMessages, historicalChanges, pending, meta, summary }) {
     if (summary) {
       const mode = storage.getMode?.();
@@ -68,7 +74,7 @@ export function createRestoreController({
           const recent = action === 'onPreviewRecent' || action === 'onOpenRecovery';
           const stores = ['pending_changes', ...(full ? ['full_messages'] : []), ...(historical ? ['historical_changes'] : []), ...(recent ? ['recent_messages'] : [])];
           let { records, summary: state } = await readBackupBundle(session, fresh.identity.chatKey, stores);
-          if(action==='onPreviewPending'&&createPendingRestorePlan({chat:fresh.chat,chatKey:fresh.identity.chatKey,pending:records.pending_changes}).blockedReason) {
+          if(action==='onPreviewPending'&&(needsLegacyEvidence(records.pending_changes)||createPendingRestorePlan({chat:fresh.chat,chatKey:fresh.identity.chatKey,pending:records.pending_changes}).blockedReason)) {
             ({records,summary:state}=await readBackupBundle(session,fresh.identity.chatKey,['pending_changes','recent_messages','full_messages','historical_changes']));
           }
           const loadedPending = records.pending_changes, loadedFull = records.full_messages ?? [], loadedHistorical = records.historical_changes ?? [], loadedRecent = records.recent_messages ?? [];
@@ -93,7 +99,7 @@ export function createRestoreController({
       chatIntegrity:current.identity.meta?.chatIntegrity,
     });
     let pendingEvidence=[];
-    if(pendingPlan.blockedReason) {
+    if(needsLegacyEvidence(pending)||pendingPlan.blockedReason) {
       pendingPlan=createPendingRestorePlan({chat:current.chat,chatKey:current.identity.chatKey,pending,recent:messages,full:fullMessages,historical:historicalChanges,chatIntegrity:current.identity.meta?.chatIntegrity});
       pendingEvidence=['recent_messages','full_messages','historical_changes'];
     }
@@ -226,7 +232,26 @@ export function createRestoreController({
 
   function showRestorePreview({ plan, current, meta,evidence }) {
     if(evidence){plan.evidenceStores=Object.keys(evidence);plan.baseEvidenceHash=evidenceHash(plan,evidence);}
+    plan.storageMode??=storage.getMode?.();
+    plan.baseIntegrity??=current.identity.meta?.chatIntegrity;
+    if(plan.selectionRequired){
+      openLegacyBranchDialog({plan,onSelect:async (id,active=()=>true)=>{
+        const selected=selectPendingRestoreBranch(plan,id);
+        if(!selected)return {ok:false,reason:'请选择要恢复的完整聊天内容。'};
+        const pending=await readCurrentPending(plan.chatKey),live=getContextReader().readCurrentChat();
+        if(!active())return {ok:false,cancelled:true};
+        if(!live.ok||storage.getMode?.()!==plan.storageMode)return {ok:false,reason:'聊天或备份位置已经变化，请重新预览。'};
+        if(selected.baseIntegrity!==undefined&&live.identity.meta?.chatIntegrity!==selected.baseIntegrity)return {ok:false,reason:'聊天文件身份已经变化，请重新预览。'};
+        const checked=validateRestorePlan({plan:selected,chat:live.chat,chatKey:live.identity.chatKey,pending});
+        if(!checked.ok)return checked;
+        if(selected.targetMetadata)selected.baseMetadataHash=sha256Text(nativeMessageText(live.context?.chatMetadata??{}));
+        return showRestorePreview({plan:selected,current:live,meta});
+      }});
+      return {ok:true};
+    }
     if (plan.blockedReason) {
+      plan.previewLogId??=newRecoveryLogId();
+      recordRecoverySafely(recordRecovery,{chatKey:plan.chatKey,recoveryId:plan.previewLogId,recoverySource:plan.source,stage:'restore-blocked',errorCode:plan.blockedCode??'restore-preview-unavailable'});
       globalThis.toastr?.warning?.(plan.blockedReason, "箱装辣白菜");
       return {ok:false,reason:plan.blockedReason};
     }
@@ -253,7 +278,7 @@ export function createRestoreController({
       if(live.ok&&plan.baseIntegrity!==undefined&&live.identity.meta?.chatIntegrity!==plan.baseIntegrity)return {ok:false,reason:'聊天文件身份已经变化，请重新预览，保护记录已保留。'};
       return live;
     };
-    let pendingSummary;
+    let pendingSummary,recoveryId;
     const result = await executeRestorePlan({
       plan,
       readCurrent,
@@ -279,6 +304,8 @@ export function createRestoreController({
         finally { session.close(); }
       },
       writePending: async (records) => {
+        const root=records.find(row=>row.pendingType==='operation');recoveryId=root?.operationId;
+        if(recoveryId)recordRecoverySafely(recordRecovery,{chatKey:plan.chatKey,recoveryId,recoverySource:plan.source,stage:'restore-started',targetCount:root.afterLength,selectedOption:plan.selectedBranchNumber,candidateCount:plan.candidateCount});
         const session = await storage.open();
         try {
           await writeBackupRecords(session, { chatKey: plan.chatKey, store: 'pending_changes', rows: records.map(record => protectPendingRecord(record, getSettings(), record.afterLength??readCurrent().chat?.length??0)),
@@ -300,6 +327,10 @@ export function createRestoreController({
         });
       },
     });
+
+    recoveryId??=newRecoveryLogId();
+    recordRecoverySafely(recordRecovery,{chatKey:plan.chatKey,recoveryId,recoverySource:plan.source,stage:result.ok?'restore-submitted':result.changed?'restore-failed':'restore-blocked',
+      ...(result.ok?result.saveOutcome?.status==='timeout'?{errorCode:'restore-save-pending'}:{}:{errorCode:({pending:'restore-protection-failed',render:'restore-render-failed',save:'restore-save-unconfirmed'})[result.stage]??'restore-source-changed'})});
 
     if (result.changed) {
       onRestored();

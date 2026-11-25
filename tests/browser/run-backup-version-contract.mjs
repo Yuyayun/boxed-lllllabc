@@ -38,7 +38,10 @@ const server = http.createServer(async (request, response) => {
     return;
   }
   if (pathname === '/') { response.setHeader('Content-Type', 'text/html'); response.end('<meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/style.css"><style>body{background:#202124;color:#eee;font:16px sans-serif;--SmartThemeBlurTintColor:#25262a;--SmartThemeBodyColor:#eee;--SmartThemeBorderColor:#777}.menu_button{color:inherit;background:#333;border:1px solid #777;border-radius:5px;padding:8px}</style>'); return; }
-  if(pathname==='/style.css'){response.setHeader('Content-Type','text/css');response.end(await fs.readFile(path.join(root,'style.css')));return;}
+  if(pathname==='/style.css'||/^\/styles\/[a-z-]+\.css$/.test(pathname)){
+    try{const css=await fs.readFile(path.resolve(root,'.'+pathname));response.setHeader('Content-Type','text/css');response.end(css);}
+    catch{response.writeHead(404).end();}return;
+  }
   const file = path.resolve(root, '.' + pathname), relative = path.relative(root, file);
   if (relative.startsWith('..') || path.isAbsolute(relative) || !/^\/(src|tests)\/.+\.js$/.test(pathname)) { response.writeHead(404).end(); return; }
   try { response.setHeader('Content-Type', 'text/javascript'); response.end(await fs.readFile(file)); }
@@ -72,7 +75,21 @@ try {
       },{mode,nonce});
       assert.equal(journalCases.length,13);assert.deepEqual(errors,[]);
       if(process.env.BOXED_SCREENSHOT_ROOT){await page.screenshot({path:path.join(process.env.BOXED_SCREENSHOT_ROOT,`${mode}-${mobile?'mobile':'desktop'}-recovery.png`)});await page.locator('.boxed-lllllabc-recovery-source button').first().click();await page.screenshot({path:path.join(process.env.BOXED_SCREENSHOT_ROOT,`${mode}-${mobile?'mobile':'desktop'}-preview.png`)});}
-      console.log(JSON.stringify({ mode, mobile, checks: checks.length, cases: checks, historicalRepairCases,journalCases }));
+      const legacyCases=await page.evaluate(async({mode,nonce})=>{
+        const adapter=mode==='sqlite'?(await import('/src/storage/sqlite-client.js')).createSqliteStorage({getRequestHeaders:()=>({'X-Test-Nonce':nonce,'X-CSRF-Token':nonce})}):undefined;
+        return (await import('/tests/browser/legacy-sequence-contract.js')).runLegacySequenceContract({adapter,mode});
+      },{mode,nonce});
+      assert.equal(legacyCases.length,12);assert.deepEqual(errors,[]);
+      const recoveryLogCases=await page.evaluate(async({mode,nonce})=>{
+        const adapter=mode==='sqlite'?(await import('/src/storage/sqlite-client.js')).createSqliteStorage({getRequestHeaders:()=>({'X-Test-Nonce':nonce,'X-CSRF-Token':nonce})}):undefined;
+        return (await import('/tests/browser/recovery-log-contract.js')).runRecoveryLogContract({adapter,mode});
+      },{mode,nonce});
+      assert.equal(recoveryLogCases.length,2);assert.deepEqual(errors,[]);
+      if(process.env.BOXED_LEGACY_SCREENSHOT_ROOT)await page.screenshot({path:path.join(process.env.BOXED_LEGACY_SCREENSHOT_ROOT,`${mode}-${mobile?'mobile':'desktop'}-branch.png`)});
+      const statusCopyCases=await page.evaluate(async()=> (await import('/tests/browser/status-copy-contract.js')).runStatusCopyContract());
+      assert.equal(statusCopyCases.length,10);assert.deepEqual(errors,[]);
+      if(process.env.BOXED_STATUS_COPY_SCREENSHOT_ROOT)await page.screenshot({path:path.join(process.env.BOXED_STATUS_COPY_SCREENSHOT_ROOT,`${mode}-${mobile?'mobile':'desktop'}-status.png`)});
+      console.log(JSON.stringify({ mode, mobile, checks: checks.length, cases: checks, historicalRepairCases,journalCases,legacyCases,recoveryLogCases,statusCopyCases }));
     } finally { await context.close(); }
   }
 } finally {

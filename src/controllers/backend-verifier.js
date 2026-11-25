@@ -6,6 +6,7 @@ import { comparePendingWithBackend } from "../verifier/compare.js";
 import { nativeChatHash,warmNativeChat } from '../backup/native-content.js';
 import { warmPendingRecords } from '../backup/pending-journal.js';
 import { confirmSnapshotPending } from "../snapshots/confirmation.js";
+import {recordRecoverySafely} from '../storage/recovery-log.js';
 
 export function createBackendVerifier({
   storage = defaultBackupStorage,
@@ -29,6 +30,9 @@ export function createBackendVerifier({
   AbortControllerImpl = globalThis.AbortController,
   setTimer = globalThis.setTimeout,
   clearTimer = globalThis.clearTimeout,
+  recordRecovery=()=>{},
+  preparePendingVerification=async()=>{},
+  isGenerating=()=>false,
 }) {
   let verifyTimer = null;
   let verifyRunId = 0;
@@ -135,11 +139,16 @@ export function createBackendVerifier({
       return publishStatus(runId, { status, refresh: true });
     }
 
-    const current = getContextReader().readCurrentChat();
+    let current = getContextReader().readCurrentChat();
     if (!current.ok || current.identity.chatKey !== chatKey || !isCurrentRun(runId)) {
       return latestStatus();
     }
 
+    const integrity=current.identity.meta?.chatIntegrity;
+    await enqueueEffect(runId,()=>preparePendingVerification({chatKey,shouldContinue:()=>isCurrentRun(runId)}));
+    if(!isCurrentRun(runId))return latestStatus();
+    current=getContextReader().readCurrentChat();
+    if(!current.ok||current.identity.chatKey!==chatKey||current.identity.meta?.chatIntegrity!==integrity)return latestStatus();
     const pending = await readCurrentPending(chatKey);
     await warmPendingRecords(pending);
     await warmNativeChat(pending.map(row=>row.raw??row.message?.raw).filter(Boolean));
@@ -174,6 +183,18 @@ export function createBackendVerifier({
       });
     }
 
+    const hasJournal=pending.some(row=>row.pendingFormat);
+    if(hasJournal&&isGenerating())return handleVerificationPending({chatKey,pending,retryIndex,runId,
+      detail:'生成尚未结束，操作记录继续保留，结束后再核对保存。'});
+    const finalHash=hasJournal?nativeChatHash(current.chat):null;
+    const targetUnchanged=()=>{
+      if(!isCurrentRun(runId))return false;
+      if(!finalHash)return true;
+      if(isGenerating())return false;
+      const live=getContextReader().readCurrentChat();
+      return live.ok&&live.identity.chatKey===chatKey&&live.identity.meta?.chatIntegrity===integrity&&nativeChatHash(live.chat)===finalHash;
+    };
+
     const checking = await prioritizeFullBackupStatus(
       chatKey,
       createDisplayStatus("checking", "正在检查保存状态", "", pending),
@@ -201,6 +222,8 @@ export function createBackendVerifier({
 
       await warmNativeChat(stripChatHeader(backend.chat));
       if(!isCurrentRun(runId))return latestStatus();
+      if(finalHash&&(!targetUnchanged()||nativeChatHash(stripChatHeader(backend.chat))!==finalHash))return handleVerificationPending({chatKey,pending,retryIndex,runId,
+        detail:'酒馆文件尚未与本轮最终聊天一致，保护记录继续保留。'});
       const needsFullConfirmation = await needsFullBackupConfirmation(chatKey);
       if (!isCurrentRun(runId)) {
         return latestStatus();
@@ -230,21 +253,24 @@ export function createBackendVerifier({
         if (confirmation.value?.code) return publishBackupFailure(runId, chatKey, retryIndex, confirmation.value);
         fullConfirmed = true;
       }
+      const removedIds=new Set();
       if (confirmedRecords.length) {
         const deletion = await enqueueEffect(
           runId,
-          () => deleteConfirmedPending(confirmedRecords, () => isCurrentRun(runId), operationController?.signal),
+          () => targetUnchanged()?deleteConfirmedPending(confirmedRecords, () => isCurrentRun(runId), operationController?.signal):[],
         );
         if (!deletion.applied || !isCurrentRun(runId)) {
           return latestStatus();
         }
+        if(Array.isArray(deletion.value))for(const id of deletion.value)removedIds.add(id);
         if (Array.isArray(deletion.value) && deletion.value.length < confirmedRecords.length) {
           const deletedIds = new Set(deletion.value);
           const retained = confirmedRecords.filter(record => !deletedIds.has(record.id));
           const repair = await enqueueEffect(runId, () => ensurePendingBackups({ current: latestCurrent, records: retained, shouldContinue: () => isCurrentRun(runId) }));
           if (!repair.applied || !isCurrentRun(runId)) return latestStatus();
           if (repair.value?.code) return publishBackupFailure(runId, chatKey, retryIndex, repair.value);
-          await enqueueEffect(runId, () => deleteConfirmedPending(retained, () => isCurrentRun(runId), operationController?.signal));
+          const retryDeletion=await enqueueEffect(runId, () => targetUnchanged()?deleteConfirmedPending(retained, () => isCurrentRun(runId), operationController?.signal):[]);
+          if(retryDeletion.applied&&Array.isArray(retryDeletion.value))for(const id of retryDeletion.value)removedIds.add(id);
           if (!isCurrentRun(runId)) return latestStatus();
         }
       }
@@ -253,7 +279,11 @@ export function createBackendVerifier({
       if (!isCurrentRun(runId)) {
         return latestStatus();
       }
-      if (!latestPending.length && (!needsFullConfirmation || backendMatchesCurrent)) {
+      const retainedIds=new Set(latestPending.map(row=>row.id));
+      for(const root of confirmedRecords)if(root.pendingType==='operation'&&root.kind==='restore'&&removedIds.has(root.id)&&!retainedIds.has(root.id)){
+        recordRecoverySafely(recordRecovery,{chatKey,recoveryId:root.operationId,stage:'restore-confirmed',targetCount:root.afterLength,...(root.snapshotSaveProof?{recoverySource:'snapshot'}:{})});
+      }
+      if (!latestPending.length && (!needsFullConfirmation || backendMatchesCurrent) && targetUnchanged()) {
         await enqueueEffect(runId, () => onPendingBackupsConfirmed(confirmedRecords));
         if (!isCurrentRun(runId)) return latestStatus();
         if (needsFullConfirmation && !fullConfirmed) {
@@ -277,12 +307,13 @@ export function createBackendVerifier({
         });
       }
 
+      const backupPending=targetUnchanged()&&confirmedRecords.length&&latestPending.every(record=>confirmedIds.has(record.id));
       return handleVerificationPending({
         chatKey,
         pending: latestPending,
         retryIndex,
-        detail: confirmedRecords.length && latestPending.every(record => confirmedIds.has(record.id)) ? '酒馆文件已确认，备份仍在补全；保护记录继续保留。' : "酒馆聊天文件内容尚未与当前聊天完全一致。",
-        outcome: confirmedRecords.length && latestPending.every(record => confirmedIds.has(record.id)) ? 'backup-pending' : "unconfirmed",
+        detail: backupPending ? '酒馆文件已确认，备份仍在补全；保护记录继续保留。' : "酒馆聊天文件内容尚未与当前聊天完全一致。",
+        outcome: backupPending ? 'backup-pending' : "unconfirmed",
         runId,
       });
     } catch (error) {

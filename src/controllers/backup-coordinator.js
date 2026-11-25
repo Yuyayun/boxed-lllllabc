@@ -20,6 +20,7 @@ import {
   updateLegacyRenameObservation,
 } from "../rename/legacy-rename.js";
 import { formatStatusText } from "../ui/presentation.js";
+import { formatPendingStatusText } from '../ui/pending-status-text.js';
 import { readBackendChat } from "../verifier/backend-reader.js";
 import { refreshBoundedFullBackup } from '../backup/full-bounded.js';
 import { readBackupRecords, writeBackupRecords, backupBatches, backupFailure } from '../storage/backup-batches.js';
@@ -81,6 +82,18 @@ export function createBackupCoordinator({
     queuedBackup = run.catch(() => {}); return run;
   }
 
+  function captureSettledState() {
+    const capture=observer.settle();
+    if(capture.records.length)unwrittenCaptures.add(capture);
+    return {eventName:'message_updated',args:[],capture};
+  }
+
+  async function preparePendingVerification({chatKey,shouldContinue=()=>true}) {
+    const current=getContextReader().readCurrentChat();
+    if(!getSettings().enabled||!shouldContinue()||!current.ok||current.identity.chatKey!==chatKey)return;
+    await persistCapturedTriggers([captureSettledState()]);
+  }
+
   async function runBackupNowImpl(trigger = {}) {
     const eventName = typeof trigger === "string" ? trigger : trigger.eventName || "manual";
     const args = typeof trigger === "string" ? [] : trigger.args || [];
@@ -98,7 +111,7 @@ export function createBackupCoordinator({
     }
 
     await prepareBackup();
-    try { await persistCapturedTriggers(triggerList); }
+    try { if(triggerList.some(item=>item.capture))triggerList=[...triggerList,captureSettledState()];await persistCapturedTriggers(triggerList); }
     catch(error) {const status=backupFailureStatus(error);setStatus(status);await refreshVisiblePanel();return status;}
     const contextReader = getContextReader();
     const current = contextReader.readCurrentChat();
@@ -602,10 +615,11 @@ export function createBackupCoordinator({
 
   function createDisplayStatus(code, text, detail = "", pending = []) {
     const summary = summarizePendingChanges(pending);
-    return createBackupStatus(code, formatStatusText(text, summary.rangeText), detail);
+    return createBackupStatus(code, formatPendingStatusText(text, pending) ?? formatStatusText(text, summary.rangeText), detail);
   }
 
   return {
+    preparePendingVerification,
     ensurePendingBackups,
     hasBackupProblem: chatKey => backupProblems.has(chatKey),
     onPendingBackupsConfirmed(records) {

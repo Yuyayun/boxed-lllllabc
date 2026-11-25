@@ -31,12 +31,13 @@ test('full and historical copies can provide missing legacy message bodies',()=>
     const plan=createPendingRestorePlan({...f,chatKey});assert.equal(plan.blockedReason,'');assert.deepEqual(plan.targetChat,f.target);
   }
 });
-test('legacy hash mismatch, missing hash, foreign identity and indistinguishable native fields are rejected',()=>{
+test('legacy invalid proof and foreign identity are blocked; indistinguishable native variants require a whole-branch choice',()=>{
   const f=fixture();f.pending.at(-1).canonicalChatHash='00000000';assert(createPendingRestorePlan({...f,chatKey}).blockedReason);
   delete f.pending.at(-1).canonicalChatHash;assert(createPendingRestorePlan({...f,chatKey}).blockedReason);
   const second=fixture();second.pending[0].chatKey='another';assert(createPendingRestorePlan({...second,chatKey}).blockedReason);
   const third=fixture();third.chat[27].original_avatar='one.png';third.pending[0].message.raw.original_avatar='two.png';
-  assert.match(createPendingRestorePlan({...third,chatKey}).blockedReason,/多个/);
+  const choice=createPendingRestorePlan({...third,chatKey});
+  assert.equal(choice.selectionRequired,true);assert.equal(choice.branchChoices.length,2);
 });
 test('new ordered deletion can follow a fully reconstructable old numeric baseline',()=>{
   const chat=[message(0)],pending=[createMessageRecord({chatKey,messageIndex:1,kind:'new_message',message:message(1),now:old})];

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {formatRuntimeLog} from '../src/storage/runtime-log-format.js';
 import {supervisorProgressText} from '../src/ui/storage-switch.js';
 import {STORAGE_OPERATIONS,BATCH_TRANSFER_METHODS} from '../src/storage/protocol.js';
-import {RUNTIME_LOG_OPERATIONS,runtimeLogContext,runtimeLogOutcome} from '../src/storage/runtime-log-labels.js';
+import {RUNTIME_LOG_OPERATIONS,runtimeLogContext,runtimeLogOutcome,chatLogRef} from '../src/storage/runtime-log-labels.js';
 
 test('日志时间按运行环境本地时区展示到秒，保留原始数据及非法时间戳', () => {
   const timestamp = '2026-11-17T23:40:01.642Z';
@@ -52,7 +52,7 @@ test('所有开放的备份和分批存储操作都有明确中文名称，分�
     assert.doesNotMatch(text,/其他服务器存储操作|日常备份操作/);
   }
   const context=runtimeLogContext('getBackupPage',[{store:'historical_changes',chatKey:'SECRET'}]);
-  assert.deepEqual(context,{backupStore:'historical_changes'});
+  assert.deepEqual(context,{backupStore:'historical_changes',chatRef:chatLogRef('SECRET')});
   assert.match(formatRuntimeLog({operation:'getBackupPage',...context,stage:'finished'}),/分批读取历史楼层改动.*本批读取完成/);
   assert.deepEqual(runtimeLogContext('getBackupPage',[{store:'SECRET'}]),{});
   assert.deepEqual(runtimeLogContext('getBackupPage',[{store:Object.create(null)}]),{});

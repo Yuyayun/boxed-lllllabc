@@ -35,6 +35,7 @@ import {
   renderUpdateState,
 } from "./src/ui/extension-info.js";
 import { openStorageWarningDialog, renderSettingsStorage } from "./src/ui/storage-status.js";
+import {createRecoveryLogRecorder} from './src/storage/recovery-log.js';
 
 const extensionName = "boxed-lllllabc";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
@@ -43,6 +44,7 @@ const storageControl = createStorageControl();
 let runtimeLogUi;
 const adapters = { indexeddb: createIndexedDbStorage({onLegacyProgress:r=>switchUi?.progress(legacyRecoveryProgressText(r))}), sqlite: createSqliteStorage({ getRequestHeaders,onStatus:health=>runtimeLogUi?.connection(health),onLogStatus:health=>runtimeLogUi?.logStatus(health),onProgress:state=>switchUi?.monitor(state) }) };
 const backupStorage = createManagedStorage({ control: storageControl, adapters });
+const recoveryLog=createRecoveryLogRecorder({send:event=>adapters.sqlite.recordRecoveryEvent(event),getStorageMode:()=>backupStorage.getMode()});
 const operationGate = createOperationGate();
 let switchUi;
 let snapshotController;
@@ -157,6 +159,9 @@ function initializeControllers() {
   });
 
   backendVerifier = createBackendVerifier({
+    isGenerating,
+    preparePendingVerification: (...args) => backupCoordinator.preparePendingVerification(...args),
+    recordRecovery:recoveryLog.record,
     storage: backupStorage,
     getContextReader,
     getSettings,
@@ -176,6 +181,7 @@ function initializeControllers() {
   });
 
   restoreController = createRestoreController({
+    recordRecovery:recoveryLog.record,
     runGuard: runRestoreGuard,
     saveChatSnapshot:saveNativeChatSnapshot,
     getSourceEpoch:()=>backupCoordinator.getSourceEpoch(),
@@ -221,6 +227,7 @@ function initializeControllers() {
   });
 
   snapshotController = createSnapshotController({
+    recordRecovery:recoveryLog.record,
     getSettings,
     restoreGuard:runRestoreGuard,
     saveChatSnapshot:saveNativeChatSnapshot,

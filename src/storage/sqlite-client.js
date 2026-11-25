@@ -5,6 +5,7 @@ import {migrationSpaceBudget} from './capacity-budget.js';
 export function createSqliteStorage({ fetchImpl = globalThis.fetch, getRequestHeaders = () => ({}), timeoutMs = 15000, logTimeoutMs = 2000, onProgress = () => {}, onStatus = () => {}, onLogStatus = () => {} } = {}) {
   const base = "/api/plugins/boxed-lllllabc";
   let logRequestFailed=false;
+  let logCapabilities={};
   async function request(route, body, signal) {
     const timeout = new AbortController();
     const abort = () => timeout.abort();
@@ -28,6 +29,7 @@ export function createSqliteStorage({ fetchImpl = globalThis.fetch, getRequestHe
           : "服务器备份插件未返回兼容的响应，请检查安装及版本。"), { code: response.status === 403 ? "permission-denied" : "unavailable" });
       }
       if(data.logHealth&&(data.logHealth.available===false||!logRequestFailed))onLogStatus(data.logHealth);
+      if(data.capabilities)logCapabilities=data.capabilities;
       if (data.protocol !== STORAGE_PROTOCOL) throw Object.assign(new Error("服务器备份插件协议不兼容，请检查前端扩展与插件版本。"), { code: "protocol-incompatible" });
       if (!response.ok || data.ok === false) throw Object.assign(new Error(data.reason || "SQLite 操作失败。"), { code: data.code || "database-error", capabilities:data.capabilities });
       return data;
@@ -47,7 +49,14 @@ export function createSqliteStorage({ fetchImpl = globalThis.fetch, getRequestHe
     batchVersion: BATCH_TRANSFER_VERSION,
     async logEvent(event){
       const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),logTimeoutMs);
-      try{const result=await request('logs/event',{protocol:STORAGE_PROTOCOL,...event},controller.signal);if(!result.ok)throw new Error(result.reason);logRequestFailed=false;onLogStatus({available:true});return result;}
+      try{const result=await request('logs/event',{protocol:STORAGE_PROTOCOL,...event},controller.signal);if(!result.ok)throw new Error(result.reason);logRequestFailed=result.logHealth?.available===false;onLogStatus(result.logHealth??{available:true});return result;}
+      catch(error){logRequestFailed=true;onLogStatus({available:false});throw error;}
+      finally{clearTimeout(timer);}
+    },
+    async recordRecoveryEvent(event){
+      if(logCapabilities.recoveryLogs!==1)return false;
+      const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),logTimeoutMs);
+      try{const result=await request('logs/event',{protocol:STORAGE_PROTOCOL,...event},controller.signal);if(!result.ok)throw new Error(result.reason);logRequestFailed=result.logHealth?.available===false;onLogStatus(result.logHealth??{available:true});return true;}
       catch(error){logRequestFailed=true;onLogStatus({available:false});throw error;}
       finally{clearTimeout(timer);}
     },
