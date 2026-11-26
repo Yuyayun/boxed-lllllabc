@@ -9,6 +9,13 @@ const root = path.resolve(fileURLToPath(new URL('../../', import.meta.url)));
 const playwright = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright');
 const output = path.resolve(process.env.BOXED_TEST_OUTPUT ?? path.join(root, '.local-test/review-1.0.5-fix.2'));
 const baselineCache = new Map(), git = promisify(execFile);
+const testTimeout = (name, fallback) => {
+  const value = Number(process.env[name] ?? fallback);
+  if (!Number.isSafeInteger(value) || value < 1000 || value > 3600000) throw new Error(`${name} 必须是 1000 到 3600000 毫秒`);
+  return value;
+};
+const regressionTimeoutMs = testTimeout('BOXED_REGRESSION_TIMEOUT_MS', 600000);
+const regressionIdleMs = testTimeout('BOXED_REGRESSION_IDLE_MS', 180000);
 await fs.mkdir(output, { recursive: true });
 const server = http.createServer(async (req, res) => {
   try {
@@ -93,15 +100,34 @@ try {
           if (selected && !selected.includes(file)) continue;
           const fixture = await browser.newContext(), target = await fixture.newPage(), pageErrors = [];
           console.log(`${engine}: 开始 ${file}`);
-          const timeout = setTimeout(() => { console.log(`${engine}: ${file} 超过十分钟时限`); stopOwnedBrowser(); }, 600000);
+          let idle, timedOut = false, lastProgress, progressWrites = Promise.resolve();
+          const progressPath = path.join(output, `${file}.progress.jsonl`);
+          const stop = reason => { timedOut = true; console.log(`${engine}: ${file} ${reason}; 最后进度 ${JSON.stringify(lastProgress)}`); stopOwnedBrowser(); };
+          const timeout = setTimeout(() => stop(`超过 ${regressionTimeoutMs / 1000} 秒总时限`), regressionTimeoutMs);
+          const touch = () => {
+            if (file !== 'historical-repair-contract') return;
+            clearTimeout(idle); idle = setTimeout(() => stop(`连续 ${regressionIdleMs / 1000} 秒未报告实际进展`), regressionIdleMs);
+          };
+          target.on('console', message => {
+            if (!message.text().startsWith('IDB_HISTORY ')) return;
+            try {
+              const entry = JSON.parse(message.text().slice('IDB_HISTORY '.length)); lastProgress = entry;
+              console.log(`${engine}: ${file} ${JSON.stringify(lastProgress)}`); touch();
+              progressWrites = progressWrites.then(() => fs.appendFile(progressPath, JSON.stringify(entry) + '\n'));
+            } catch {}
+          });
+          touch();
           target.on('pageerror', error => pageErrors.push(error.message));
           try {
             await target.goto(`http://127.0.0.1:${server.address().port}${pathname ?? '/'}`);
-            const checks = await target.evaluate(async ({ file, method }) => (await import(`/tests/browser/${file}.js`))[method](), { file, method });
-            regressions.push({ file, checks, pageErrors }); if (pageErrors.length) process.exitCode = 1;
+            const checks = await target.evaluate(async ({ file, method }) => {
+              const options = file === 'historical-repair-contract' ? { traceRequests: true, uiTimeoutMs: 30000, onProgress: item => console.log(`IDB_HISTORY ${JSON.stringify(item)}`) } : undefined;
+              return (await import(`/tests/browser/${file}.js`))[method](options);
+            }, { file, method });
+            regressions.push({ file, checks, pageErrors, ...(lastProgress ? { lastProgress, progressLog: path.basename(progressPath) } : {}) }); if (pageErrors.length) process.exitCode = 1;
             console.log(`${engine}: ${file} 通过`);
-          } catch (error) { regressions.push({ file, error: error.message, pageErrors }); console.log(`${engine}: ${file} 未通过 ${error.message.split('\n')[0]}`); process.exitCode = 1; }
-          finally { clearTimeout(timeout); await fixture.close(); await fs.writeFile(path.join(output, 'browser.json'), JSON.stringify(results, null, 2)); }
+          } catch (error) { regressions.push({ file, error: error.message, pageErrors, timedOut, lastProgress }); console.log(`${engine}: ${file} 未通过 ${error.message.split('\n')[0]}`); process.exitCode = 1; }
+          finally { clearTimeout(timeout); clearTimeout(idle); await progressWrites; await fixture.close(); await fs.writeFile(path.join(output, 'browser.json'), JSON.stringify(results, null, 2)); }
         }
         results.at(-1).regressions = regressions;
         await fs.writeFile(path.join(output, 'browser.json'), JSON.stringify(results, null, 2));
