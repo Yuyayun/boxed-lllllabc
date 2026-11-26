@@ -11,6 +11,7 @@ export function createStorageController({
   renderOverview,
   showWarning,
   openCatalog,
+  onLocalFailure = () => {},
   buildCatalog = buildBackupCatalog,
   estimateStorage = estimateOriginStorage,
   sessionStore = globalThis.sessionStorage,
@@ -54,6 +55,7 @@ export function createStorageController({
       return latestSnapshot;
     } catch (error) {
       const sqlite = storage.getMode?.() === "sqlite";
+      if (!sqlite) onLocalFailure(error);
       latestSnapshot = createStorageSnapshot({
         failure: sqlite ? { type: "database", shortText: "服务器存储不可用", detail: error.message || "请检查可选服务器插件的连接与权限；未改用浏览器本地存储。" } : describeStorageFailure(error),
         estimate: storage.getMode?.() === "sqlite" ? {} : await estimateStorage(),

@@ -36,13 +36,19 @@ import {
 } from "./src/ui/extension-info.js";
 import { openStorageWarningDialog, renderSettingsStorage } from "./src/ui/storage-status.js";
 import {createRecoveryLogRecorder} from './src/storage/recovery-log.js';
+import { createLocalRecovery } from './src/storage/local-recovery.js';
+import { createLocalRecoveryUi } from './src/ui/local-recovery.js';
 
 const extensionName = "boxed-lllllabc";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
 
 const storageControl = createStorageControl();
 let runtimeLogUi;
-const adapters = { indexeddb: createIndexedDbStorage({onLegacyProgress:r=>switchUi?.progress(legacyRecoveryProgressText(r))}), sqlite: createSqliteStorage({ getRequestHeaders,onStatus:health=>runtimeLogUi?.connection(health),onLogStatus:health=>runtimeLogUi?.logStatus(health),onProgress:state=>switchUi?.monitor(state) }) };
+let localRecoveryUi;
+const adapters = { indexeddb: createIndexedDbStorage({onLegacyProgress:r=>switchUi?.progress(legacyRecoveryProgressText(r)), onFailure: ({error,critical}) => {
+  localRecoveryUi?.showFault(error);
+  if (critical) { backendVerifier?.clearScheduledVerification(); setStatus(createBackupStatus('db-error', '本地备份暂时暂停', error)); }
+}}), sqlite: createSqliteStorage({ getRequestHeaders,onStatus:health=>runtimeLogUi?.connection(health),onLogStatus:health=>runtimeLogUi?.logStatus(health),onProgress:state=>switchUi?.monitor(state) }) };
 const backupStorage = createManagedStorage({ control: storageControl, adapters });
 const recoveryLog=createRecoveryLogRecorder({send:event=>adapters.sqlite.recordRecoveryEvent(event),getStorageMode:()=>backupStorage.getMode()});
 const operationGate = createOperationGate();
@@ -129,6 +135,10 @@ const pageReloadScheduler = createPageReloadScheduler({
 
 function setStatus(status) {
   if (status?.code === 'backup-read-failed') return;
+  if (status?.code === 'saved' && backupStorage.getMode() === 'indexeddb' && adapters.indexeddb.getRecoveryState().writePaused) {
+    const fault = adapters.indexeddb.getRecoveryState();
+    status = createBackupStatus('db-error', fault.unknownWrites.length ? '备份结果待核对' : '本地备份暂时暂停', fault.error);
+  }
   latestStatus = status;
   $("#boxed-lllllabc-settings-state").text(status.shortText);
   updateStatusLine(status);
@@ -142,6 +152,7 @@ function initializeControllers() {
   };
 
   backupCoordinator = createBackupCoordinator({
+    onStorageFailure: error => { if (!adapters.indexeddb.getRecoveryState().writePaused) adapters.indexeddb.markRecoveryFailure(error); },
     prepareBackup: async () => { backendVerifier?.clearScheduledVerification(); await backendVerifier?.whenIdle(); },
     storage: backupStorage,
     getContextReader,
@@ -246,12 +257,26 @@ function initializeControllers() {
     renderOverview: renderSettingsStorage,
     showWarning: openStorageWarningDialog,
     openCatalog: () => catalogController?.openCatalog(),
+    onLocalFailure: error => localRecoveryUi?.showFault(error),
   });
 }
 
 async function runBackupNow(...args) {
   if (operationGate.isPaused()) return latestStatus;
-  const status = await operationGate.run(() => backupCoordinator.runBackupNow(...args));
+  if (backupStorage.getMode() === 'indexeddb' && adapters.indexeddb.getRecoveryState().writePaused) {
+    const state = adapters.indexeddb.getRecoveryState();
+    localRecoveryUi?.showFault(state.error);
+    const status = createBackupStatus('db-error', state.unknownWrites.length ? '备份结果待核对' : '本地备份暂时暂停', state.error);
+    setStatus(status); return status;
+  }
+  let status;
+  try { status = await operationGate.run(() => backupCoordinator.runBackupNow(...args)); }
+  catch (error) {
+    if (backupStorage.getMode() !== 'indexeddb') throw error;
+    if (!adapters.indexeddb.getRecoveryState().writePaused) adapters.indexeddb.markRecoveryFailure(error);
+    localRecoveryUi?.showFault(error);
+    status = createBackupStatus('db-error', '本地备份暂不可用', error); setStatus(status);
+  }
   storageController?.handleBackupStatus(status);
   return status;
 }
@@ -427,11 +452,45 @@ jQuery(async () => {
     },
   });
   switchUi.bind();
+  const localRecovery = createLocalRecovery({
+    control: storageControl, local: adapters.indexeddb,
+    pause: async () => {
+      if (isGenerating()) throw new Error('请先停止生成，再处理本地备份。');
+      backendVerifier?.clearScheduledVerification();
+      await backupEvents?.pause();
+      await operationGate.pause('local-recovery');
+      backendVerifier?.clearScheduledVerification(); await backendVerifier?.whenIdle();
+    },
+    resume: async () => {
+      operationGate.resume('local-recovery');
+      if (!operationGate.isPaused()) backupEvents?.resume();
+    },
+    onRebuilt: async () => {
+      backupCoordinator.resetAfterLocalRebuild();
+      // Detached old previews cannot submit their plans into the replacement DB.
+      for (const node of document.querySelectorAll('.boxed-lllllabc-dialog')) node.remove();
+      for (const target of ['settings', 'status', 'dialog']) panelController.setPanelOpenState(target, false);
+    },
+    onProgress: value => localRecoveryUi?.progress(value),
+  });
+  localRecoveryUi = createLocalRecoveryUi({ coordinator: localRecovery,
+    getMode: () => backupStorage.getMode(),
+    getChatKey: () => contextReader.readCurrentChat().identity?.chatKey,
+    onRecovered: async () => {
+      const state = await backupStorage.refresh();
+      if (!state.journal && storageRecoveryPending) { storageRecoveryPending = false; operationGate.resume(); backupEvents?.resume(); switchUi?.close(); }
+      setStatus(await runBackupNow({ eventName: 'local-backup-recovery', args: [] }));
+      await storageController.refresh();
+    },
+  });
+  localRecoveryUi.bind();
+  if (adapters.indexeddb.getRecoveryState().writePaused) localRecoveryUi.showFault(adapters.indexeddb.getRecoveryState().error);
   try {
     await backupStorage.refresh();
     await transferCoordinator.recover();
     await switchUi.refresh();
   } catch (error) {
+    localRecoveryUi.showFault(error);
     storageRecoveryPending = true;
     await operationGate.pause();
     await switchUi.failure(error);

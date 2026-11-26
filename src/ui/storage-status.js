@@ -4,6 +4,10 @@ import { STORAGE_LOCATION_NAMES } from "./storage-location.js";
 const WARNING_DIALOG_ID = "boxed-lllllabc-storage-warning-dialog";
 
 export function renderSettingsStorage(snapshot = {}) {
+  if (snapshot.mode === 'sqlite') {
+    const localRecovery = document.querySelector('#boxed-lllllabc-local-recovery');
+    if (localRecovery) localRecovery.hidden = true;
+  }
   const presentation = createSettingsStoragePresentation(snapshot);
   setText("#boxed-lllllabc-storage-title", presentation.title);
   setText("#boxed-lllllabc-storage-site-label", presentation.siteLabel);
@@ -77,7 +81,7 @@ export function openStorageWarningDialog({ snapshot = {}, onManage } = {}) {
   header.className = "boxed-lllllabc-dialog-header";
   const title = document.createElement("strong");
   title.id = "boxed-lllllabc-storage-warning-title";
-  title.textContent = compatibility?snapshot.failure.shortText:snapshot.pressure === "error" ? "本次备份没有写入成功" : "本地存储空间偏紧";
+  title.textContent = snapshot.failure?.shortText || (snapshot.pressure === "error" ? "本地备份暂不可用" : "本地存储空间偏紧");
   const close = createButton("", "fa-solid fa-xmark", "关闭");
   header.append(title, close);
 

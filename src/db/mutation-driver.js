@@ -1,7 +1,8 @@
+import { idbRequest as request, iterateCursor } from './idb-helpers.js';
+
 // Cursor callbacks only await IDB requests, keeping the owning transaction live.
 export function mutationDriver(store, onMutation) {
   if (typeof store.openCursor !== 'function') return store;
-  const request = value => new Promise((resolve, reject) => { value.onsuccess = () => resolve(value.result); value.onerror = () => reject(value.error); });
   const track = value => {
     if (onMutation) value.addEventListener('success', onMutation, { once: true });
     return value;
@@ -15,18 +16,13 @@ export function mutationDriver(store, onMutation) {
     return deletion;
   };
   const index = () => store.index(store.name.endsWith('snapshot_messages') ? 'by_snapshot' : 'by_chat');
-  const eachForChat = (key, callback) => new Promise((resolve, reject) => {
-    const read = index().openCursor(IDBKeyRange.only(key));
-    read.onerror = () => reject(read.error);
-    read.onsuccess = () => {
-      const cursor = read.result; if (!cursor) return resolve();
-      const trackedCursor = onMutation ? new Proxy(cursor, { get(target, key) {
-        if (key === 'delete' || key === 'update') return (...args) => track(target[key](...args));
-        const value = Reflect.get(target, key, target);
-        return typeof value === 'function' ? value.bind(target) : value;
-      } }) : cursor;
-      try { Promise.resolve(callback(cursor.value, trackedCursor)).then(() => cursor.continue(), reject); } catch (error) { reject(error); }
-    };
+  const eachForChat = (key, callback) => iterateCursor(index(), IDBKeyRange.only(key), cursor => {
+    const trackedCursor = onMutation ? new Proxy(cursor, { get(target, key) {
+      if (key === 'delete' || key === 'update') return (...args) => track(target[key](...args));
+      const value = Reflect.get(target, key, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    } }) : cursor;
+    return Promise.resolve(callback(cursor.value, trackedCursor)).then(() => undefined);
   });
   return {
     name: store.name, get: store.get.bind(store), put: value => track(store.put(value)), delete: deleteKey, index: store.index.bind(store),

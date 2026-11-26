@@ -46,6 +46,7 @@ export function createBackupCoordinator({
   readRenameSourceMeta = (chatKey) => readStoredChatMeta(storage, chatKey),
   readRenameBackend = readBackendChat,
   prepareBackup = async () => {},
+  onStorageFailure = () => {},
 }) {
   let legacyRenameObservation = null;
   const fullViews = new Map();
@@ -559,6 +560,7 @@ export function createBackupCoordinator({
       }
     } catch (error) {
       console.warn("[boxed-lllllabc] 读取完整备份状态失败", error);
+      if (storage.getMode?.() !== 'sqlite') { onStorageFailure(error); return createBackupStatus('db-error', '备份保护状态暂不可读取', error); }
       return status;
     }
   }
@@ -580,6 +582,7 @@ export function createBackupCoordinator({
       }
     } catch (error) {
       console.warn("[boxed-lllllabc] 读取完整备份确认状态失败", error);
+      if (storage.getMode?.() !== 'sqlite') { onStorageFailure(error); throw error; }
       return false;
     }
   }
@@ -632,6 +635,10 @@ export function createBackupCoordinator({
       const captured=observer.capture(trigger);if(captured.records.length)unwrittenCaptures.add(captured);return captured;
     },
     resetObservation: ()=>observer.reset(),
+    resetAfterLocalRebuild() {
+      sourceEpoch++; legacyRenameObservation = null;
+      fullViews.clear(); backupProblems.clear(); backupRepairs.clear(); unwrittenCaptures.clear(); observer.reset();
+    },
     persistCapturedTriggers,
     whenIdle: ()=>queuedBackup,
     confirmFullBackupAfterBackendVerification,

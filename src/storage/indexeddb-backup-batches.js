@@ -3,29 +3,16 @@ import { ALL_DATASET_STORES, ACTIVE_DATASET_KEY, datasetStore, datasetId } from 
 import { createLargeBackupOperations } from './large-backup-operations.js';
 import { BACKUP_STORES, BACKUP_BUDGET, boundedRecordSize, backupFailure, measureBackupValue } from './backup-batches.js';
 import { storedChatSummary } from './backup-catalog-summary.js';
+import { idbRequest as request, iterateCursor as iterate, distinctIndexKeys, runIdbTransaction } from '../db/idb-helpers.js';
 
-const request = value => new Promise((resolve, reject) => { value.onsuccess = () => resolve(value.result); value.onerror = () => reject(value.error); });
-const iterate = (source, range, callback, direction = 'next') => new Promise((resolve, reject) => {
-  const read = source.openCursor(range, direction);
-  read.onerror = () => reject(read.error);
-  read.onsuccess = () => {
-    const cursor = read.result;
-    if (!cursor) return resolve();
-    try { Promise.resolve(callback(cursor)).then(next => next === false ? resolve() : next === 'jumped' ? undefined : cursor.continue(), reject); } catch (error) { reject(error); }
-  };
-});
 export function createIndexedDbBackupBatches({ openDatabase }) {
   return createLargeBackupOperations({
     mode: 'indexeddb',
     async transaction(mode, callback) {
       const db = await openDatabase();
       try {
-        return await new Promise((resolve, reject) => {
-          const tx = db.transaction([...ALL_DATASET_STORES, ...Object.values(TRANSFER_STORES)], mode);
+        return await runIdbTransaction(db, [...ALL_DATASET_STORES, ...Object.values(TRANSFER_STORES)], mode, async tx => {
           const meta = tx.objectStore(TRANSFER_STORES.meta), staged = tx.objectStore(TRANSFER_STORES.rows);
-          let result;
-          tx.oncomplete = () => resolve(result);
-          tx.onabort = tx.onerror = () => reject(tx.error ?? backupFailure('浏览器备份事务已中止，已有正式备份已保留。'));
           const getMeta = async key => (await request(meta.get(key)))?.value;
           const putMeta = (key, value) => request(meta.put({ key, value }));
           const run = async () => {
@@ -79,23 +66,21 @@ export function createIndexedDbBackupBatches({ openDatabase }) {
               async catalog(after) {
                 const keys = new Set();
                 const range = after === null ? undefined : IDBKeyRange.lowerBound(after, true);
-                // Cursor uniqueness keeps catalog key discovery independent of message count.
+                // Jump over duplicate index keys without reading message values.
                 for (const name of BACKUP_STORES) {
-                  let count = 0;
-                  await iterate(store(name).index('by_chat'), range, cursor => { keys.add(cursor.key); if (++count >= 21) return false; }, 'nextunique');
+                  for (const key of await distinctIndexKeys(store(name).index('by_chat'), range, 21)) keys.add(key);
                 }
-                const sorted = [...keys].sort(), items = [];
+                const sorted = [...keys].sort((a, b) => indexedDB.cmp(a, b)), items = [];
                 for (const key of sorted.slice(0, 20)) {
                   const chatMeta = await port.get('chat_meta', key);
-                  try { const entry = storedChatSummary(key, chatMeta, await stats(key), await port.revision()); if (entry) items.push(entry); }
-                  catch { const counts = await port.counts(key); const entry = storedChatSummary(key, chatMeta, Object.fromEntries(Object.entries(counts).map(([name, count]) => [name, { count, bytes: 0, firstIndex: null, lastIndex: null }])), await port.revision()); if (entry) items.push({ ...entry, error: '此聊天的备份摘要暂时无法读取。' }); }
+                  const entry = storedChatSummary(key, chatMeta, await stats(key), await port.revision()); if (entry) items.push(entry);
                 }
                 return { items, after: sorted.length > 20 ? sorted[19] : null };
               },
             };
-            result = await callback(port);
+            return callback(port);
           };
-          run().catch(error => { try { tx.abort(); } catch {} reject(error); });
+          return run();
         });
       } finally { db.close(); }
     },

@@ -6,7 +6,7 @@ SillyTavern 聊天保存状态与备份扩展，帮助你查看备份、找回�
 
 只安装前端就能使用浏览器本地备份（IndexedDB）。[服务器插件](https://github.com/Yuyayun/boxed-lllllabc-server)是可选组件；安装后仍由你决定是否切换位置，不会自动迁移，也不会同步两个位置的数据。
 
-**开发补修：1.0.5-fix.1，尚未发布。** 调整旧版待确认记录的连续恢复与完整分支选择，完善运行日志与提示文字，并修复正常收发后持续黄灯、待确认记录不断积累的问题。恢复保护格式不变，无需清库或重新迁移。旧恢复与保存收尾补修可继续配合服务器插件 1.0.5；新增恢复过程日志需前后端均为 1.0.5-fix.1。详见[旧恢复验收](docs/acceptance/2026-11-25-legacy-recovery-fix.md)、[运行日志验收](docs/acceptance/2026-11-25-runtime-log-fix.md)及[保存收尾验收](docs/acceptance/2026-11-25-pending-finalization.md)。
+**开发补修：1.0.5-fix.2，尚未发布。** 修复 IndexedDB 目录游标兼容和异常时的事务退出，提供有限只读救援与确认重建入口；保留 1.0.5-fix.1 的连续恢复、完整分支选择、日志及正常收发后的待确认收尾修复。正常更新保留旧备份，不需要清库或重新迁移；只有用户明确放弃旧本地备份后才执行重建。后端 1.0.5 可继续使用，本次不要求升级后端；已有新增恢复过程日志仍需后端 1.0.5-fix.1。详见[本地故障处理与救援文件说明](docs/LOCAL_BACKUP_RECOVERY.md)、[本次验收](docs/acceptance/2026-11-26-indexeddb-recovery.md)、[旧恢复验收](docs/acceptance/2026-11-25-legacy-recovery-fix.md)及[保存收尾验收](docs/acceptance/2026-11-25-pending-finalization.md)。
 
 服务器备份请将前后端一并更新至 1.0.5；纯前端仍可独立工作。详情见[实现与验收](docs/acceptance/2026-11-24-pending-recovery.md)及[正式发布核对](docs/acceptance/release-1.0.5.md)。
 

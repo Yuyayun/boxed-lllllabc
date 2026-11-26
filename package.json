@@ -1,6 +1,6 @@
 {
   "name": "boxed-lllllabc",
-  "version": "1.0.5-fix.1",
+  "version": "1.0.5-fix.2",
   "description": "SillyTavern 聊天本地备份扩展。",
   "homepage": "https://github.com/Yuyayun/boxed-lllllabc",
   "repository": {
@@ -14,6 +14,8 @@
     "LICENSE",
     "README.md",
     "docs/THIRD_PARTY_LICENSE_AUDIT.md",
+    "docs/LOCAL_BACKUP_RECOVERY.md",
+    "tools/read-local-rescue.mjs",
     "index.js",
     "manifest.json",
     "settings.html",

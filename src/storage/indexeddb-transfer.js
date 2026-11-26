@@ -4,18 +4,9 @@ import { DATA_STORES, TRANSFER_PAGE_BYTES, transferId, recordText, digestRow, re
 import { encodeStorageValue } from "./protocol.js";
 import { ALL_DATASET_STORES, ACTIVE_DATASET_KEY, datasetId } from "./dataset-layout.js";
 import {createIndexedDbBatchTransfer} from './indexeddb-batch-transfer.js';
+import { idbRequest as request, iterateCursor, runIdbTransaction } from '../db/idb-helpers.js';
 
-const request = (value) => new Promise((resolve, reject) => { value.onsuccess = () => resolve(value.result); value.onerror = () => reject(value.error); });
-const cursor = (store, callback, range) => new Promise((resolve, reject) => {
-  const read = store.openCursor(range);
-  read.onerror = () => reject(read.error);
-  read.onsuccess = () => {
-    const item = read.result;
-    if (!item) return resolve();
-    try { if (callback(item) === false) return resolve(); item.continue(); }
-    catch (error) { reject(error); }
-  };
-});
+const cursor = (store, callback, range) => iterateCursor(store, range, callback);
 
 export function createIndexedDbTransfer({ openDatabase = openBackupDatabase,onLegacyProgress=()=>{} } = {}) {
   const recovery=createIndexedDbBatchTransfer({openDatabase,onLegacyProgress}).legacyRecovery;
@@ -23,18 +14,11 @@ export function createIndexedDbTransfer({ openDatabase = openBackupDatabase,onLe
     const db = await openDatabase();
     try {
       for (const name of db.objectStoreNames) if (!allowUnknown && ![...ALL_DATASET_STORES, ...Object.values(TRANSFER_STORES)].includes(name)) throw new Error(`发现未知数据仓库 ${name}，未丢弃数据，已停止切换。`);
-      return await new Promise((resolve, reject) => {
-        const transaction = db.transaction([...DATA_STORES, ...Object.values(TRANSFER_STORES)], mode);
+      return await runIdbTransaction(db, [...DATA_STORES, ...Object.values(TRANSFER_STORES)], mode, async transaction => {
         const meta = transaction.objectStore(TRANSFER_STORES.meta);
         const rows = transaction.objectStore(TRANSFER_STORES.rows);
-        let result;
-        transaction.oncomplete = () => resolve(result);
-        transaction.onerror = transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB 切换事务中止。"));
-        Promise.resolve().then(async () => {
-          if (datasetId((await request(meta.get(ACTIVE_DATASET_KEY)))?.value) !== 0) throw new Error("当前数据区需要新版分批迁移流程，旧流程未修改任何备份。");
-          return callback({ meta, rows, store: (name) => transaction.objectStore(name) });
-        })
-          .then((value) => { result = value; }).catch((error) => { try { transaction.abort(); } catch {} reject(error); });
+        if (datasetId((await request(meta.get(ACTIVE_DATASET_KEY)))?.value) !== 0) throw new Error("当前数据区需要新版分批迁移流程，旧流程未修改任何备份。");
+        return callback({ meta, rows, store: (name) => transaction.objectStore(name) });
       });
     } finally { db.close(); }
   }
