@@ -28,7 +28,7 @@ export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerati
   let monitorText;
   let resultSelector = '#boxed-lllllabc-transfer-result';
   let recoveryPending=false,recoveryError;
-  const text = (selector, value) => { const node = document.querySelector(selector); if (node) node.textContent = value; };
+  const text = (selector, value) => { const node = document.querySelector(selector); if (node && node.textContent !== value) node.textContent = value; };
   function close() { modal?.close(); modal?.remove(); modal = null; }
   async function markRecovery(pending,error) {
     recoveryPending=pending;if(error)recoveryError=error;
@@ -80,14 +80,21 @@ export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerati
     }
     progressText.focus();
   }
+  function connection(health = {}) {
+    if (!health.ok) { text('#boxed-lllllabc-sqlite-state', '服务器备份插件未连接'); return; }
+    const version = typeof health.pluginVersion === 'string' ? health.pluginVersion.trim() : '';
+    const versionText = version && version.length <= 80 && !/[\u0000-\u001f\u007f]/.test(version) ? `后端版本 ${version}` : '后端版本未知';
+    const status = health.database?.writable === true ? '服务器备份插件已连接'
+      : health.database?.writable === false ? '服务器备份插件已连接，暂时无法写入' : '服务器备份插件已连接，写入状态未确认';
+    text('#boxed-lllllabc-sqlite-state', `${status} · ${versionText}`);
+  }
   async function refresh() {
     const state=await control.read();
     text('#boxed-lllllabc-storage-mode',names[state.active]);
     const health=await sqlite.status();
     const writable=health.ok && health.database?.writable===true;
     const migrationReady=writable && health.database?.batchTransfer===BATCH_TRANSFER_VERSION;
-    text('#boxed-lllllabc-sqlite-state',health.ok ? writable ? '服务器备份插件已连接'
-      : health.database?.writable===false ? '服务器备份插件已连接，暂时无法写入' : '服务器备份插件已连接，写入状态未确认' : '服务器备份插件未连接');
+    connection(health);
     const connectionDetail=document.querySelector('#boxed-lllllabc-sqlite-detail');
     if (connectionDetail) { connectionDetail.textContent=health.ok ? health.database?.batchTransfer===BATCH_TRANSFER_VERSION ? '' : '服务器插件未提供新版迁移能力，请更新配套插件后再切换。' : health.reason || '请检查服务器备份插件是否已安装并启用。'; connectionDetail.hidden=!!health.ok && health.database?.batchTransfer===BATCH_TRANSFER_VERSION; }
     const switchButton=document.querySelector('#boxed-lllllabc-switch-storage');
@@ -172,5 +179,5 @@ export function createStorageSwitchUi({ control, sqlite, coordinator, isGenerati
     document.querySelector('#boxed-lllllabc-clear-inactive')?.addEventListener('click',()=>confirm('clear').catch(failure));
     document.querySelector('#boxed-lllllabc-check-storage')?.addEventListener('click',()=>{ resultSelector='#boxed-lllllabc-transfer-result'; refresh().then(afterChange).catch(failure); });
   }
-  return { bind, refresh, block, close, failure,showRecovery,hasPendingRecovery:()=>recoveryPending,monitor(state){const message=supervisorProgressText(state);if(monitorText?.isConnected){monitorText.textContent=message;monitorText.hidden=!message;}else if(state.state==='initializing')text('#boxed-lllllabc-sqlite-state',message);},progress(message) { if (progressText) progressText.textContent=pausing?`${message}\n已请求暂停，将在当前步骤结束后停下。`:message; } };
+  return { bind, refresh, connection, block, close, failure,showRecovery,hasPendingRecovery:()=>recoveryPending,monitor(state){const message=supervisorProgressText(state);if(monitorText?.isConnected){monitorText.textContent=message;monitorText.hidden=!message;}else if(state.state==='initializing')text('#boxed-lllllabc-sqlite-state',message);},progress(message) { if (progressText) progressText.textContent=pausing?`${message}\n已请求暂停，将在当前步骤结束后停下。`:message; } };
 }

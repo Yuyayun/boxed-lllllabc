@@ -49,7 +49,7 @@ let localRecoveryUi;
 const adapters = { indexeddb: createIndexedDbStorage({onLegacyProgress:r=>switchUi?.progress(legacyRecoveryProgressText(r)), onFailure: ({error,critical}) => {
   localRecoveryUi?.showFault(error);
   if (critical) { backendVerifier?.clearScheduledVerification(); setStatus(createBackupStatus('db-error', '本地备份暂时暂停', error)); }
-}}), sqlite: createSqliteStorage({ getRequestHeaders,onStatus:health=>runtimeLogUi?.connection(health),onLogStatus:health=>runtimeLogUi?.logStatus(health),onProgress:state=>switchUi?.monitor(state) }) };
+}}), sqlite: createSqliteStorage({ getRequestHeaders,onStatus:health=>{switchUi?.connection(health);runtimeLogUi?.connection(health);},onLogStatus:health=>runtimeLogUi?.logStatus(health),onProgress:state=>switchUi?.monitor(state) }) };
 const backupStorage = createManagedStorage({ control: storageControl, adapters });
 const recoveryLog=createRecoveryLogRecorder({send:event=>adapters.sqlite.recordRecoveryEvent(event),getStorageMode:()=>backupStorage.getMode()});
 const operationGate = createOperationGate();

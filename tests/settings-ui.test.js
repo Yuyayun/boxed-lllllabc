@@ -97,11 +97,11 @@ test("设置只按可写状态解锁切换和旧端入口，检查连接不改�
   try {
     const state = { active: "indexeddb", previous: "sqlite", lastTransfer: { id: "done" } };
     for (const writable of [false, undefined, true]) {
-      const ui = createStorageSwitchUi({ control: { read: async () => structuredClone(state) }, sqlite: { status: async () => ({ ok: true, database: { writable, batchTransfer: 3 } }) }, coordinator: {} });
+      const ui = createStorageSwitchUi({ control: { read: async () => structuredClone(state) }, sqlite: { status: async () => ({ ok: true, pluginVersion: '1.0.5-fix.1', database: { writable, batchTransfer: 3 } }) }, coordinator: {} });
       await ui.refresh(); assert.equal(nodes.get("#boxed-lllllabc-switch-storage").disabled, writable !== true); assert.equal(nodes.get("#boxed-lllllabc-clear-inactive").disabled, writable !== true);
       assert.equal(nodes.get("#boxed-lllllabc-storage-mode").textContent, "浏览器本地存储");
-      assert.equal(nodes.get("#boxed-lllllabc-sqlite-state").textContent, writable ? "服务器备份插件已连接"
-        : writable === false ? "服务器备份插件已连接，暂时无法写入" : "服务器备份插件已连接，写入状态未确认");
+      assert.equal(nodes.get("#boxed-lllllabc-sqlite-state").textContent, (writable ? "服务器备份插件已连接"
+        : writable === false ? "服务器备份插件已连接，暂时无法写入" : "服务器备份插件已连接，写入状态未确认") + ' · 后端版本 1.0.5-fix.1');
       assert.match(nodes.get("#boxed-lllllabc-clear-help").textContent, writable ? /原存储位置“服务器存储”/ : writable === false ? /暂时无法写入/ : /写入状态未确认/);
       assert.equal(state.active, "indexeddb");
     }
@@ -113,6 +113,6 @@ test('服务器可写但缺少新版迁移能力时不开放切换，不改变�
   try{
     const state={active:'indexeddb',previous:'sqlite',lastTransfer:'done-123'};
     const ui=createStorageSwitchUi({control:{read:async()=>state},sqlite:{status:async()=>({ok:true,database:{writable:true,batchTransfer:2}})},coordinator:{}});
-    await ui.refresh();assert.equal(nodes.get('#boxed-lllllabc-switch-storage').disabled,true);assert.equal(nodes.get('#boxed-lllllabc-clear-inactive').disabled,true);assert.match(nodes.get('#boxed-lllllabc-sqlite-detail').textContent,/更新配套插件/);assert.equal(state.active,'indexeddb');
+    await ui.refresh();assert.equal(nodes.get('#boxed-lllllabc-switch-storage').disabled,true);assert.equal(nodes.get('#boxed-lllllabc-clear-inactive').disabled,true);assert.match(nodes.get('#boxed-lllllabc-sqlite-detail').textContent,/更新配套插件/);assert.match(nodes.get('#boxed-lllllabc-sqlite-state').textContent,/后端版本未知/);assert.equal(state.active,'indexeddb');
   }finally{globalThis.document=previous;}
 });
