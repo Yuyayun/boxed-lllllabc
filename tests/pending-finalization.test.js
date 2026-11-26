@@ -4,6 +4,7 @@ import {createPendingObserver,pendingRecordFingerprint} from '../src/backup/pend
 import {nativeChatHash} from '../src/backup/native-content.js';
 import {comparePendingWithBackend} from '../src/verifier/compare.js';
 import {createBackendVerifier} from '../src/controllers/backend-verifier.js';
+import {createBackupCoordinator} from '../src/controllers/backup-coordinator.js';
 
 function fixture(){
  const current={ok:true,identity:{chatKey:'finalization-test',meta:{chatIntegrity:'file-one'}},chat:[{mes:'greeting',is_user:false,extra:{reasoning:''}}]};
@@ -22,6 +23,57 @@ function turn(f,legacy=false){
  assert.deepEqual(records.slice(0,early.length),early);return records;
 }
 const confirmed=(rows,chat)=>comparePendingWithBackend(rows,chat,{recentLimit:20});
+
+for(const deferHashes of [false,true])test(`新 swipe 的占位、后补字段和已有候选切换能接续核销（异步哈希 ${deferHashes}）`,async()=>{
+ const current={ok:true,identity:{chatKey:'swipe-test',meta:{chatIntegrity:'same-file'}},chat:[{
+  mes:'first reply',swipe_id:0,swipes:['first reply'],swipe_info:[{extra:{reasoning:'first reasoning'}}],extra:{reasoning:'first reasoning'},
+ }]};
+ const observer=createPendingObserver({readCurrent:()=>current,deferHashes});observer.reset();
+ const message=current.chat[0],captures=[];
+ message.swipe_id=1;
+ assert.equal(observer.capture({eventName:'message_swiped',args:[0]}).records.length,0);
+ // A slow generation lets the debounced batch observe the temporary selection.
+ captures.push(observer.settle());
+ message.swipes.length++;message.mes='second reply';message.extra={reasoning:'second reasoning'};
+ captures.push(observer.capture({eventName:'message_received',args:[0,'swipe']}));
+ message.swipes[1]=message.mes;message.swipe_info[1]={extra:structuredClone(message.extra)};
+ captures.push(observer.capture({eventName:'generation_ended',args:[current.chat.length]}));
+ await Promise.all(captures.map(capture=>capture.ready));
+ const early=captures.flatMap(capture=>capture.records),fingerprints=early.map(pendingRecordFingerprint);
+ message.extra.real_extension={keep:'late field'};message.swipe_info[1].extra=structuredClone(message.extra);
+ const settled=observer.settle();await settled.ready;
+ const rows=[...early,...settled.records];
+ assert(settled.records.length>0);assert.deepEqual(early.map(pendingRecordFingerprint),fingerprints);
+ assert.equal(confirmed(rows,structuredClone(current.chat)).remaining.length,0);
+ const missing=structuredClone(current.chat);missing[0].swipes[1]='lost second reply';
+ assert(confirmed(rows,missing).remaining.length>0);
+ for(const id of [0,1]){
+  message.swipe_id=id;message.mes=message.swipes[id];message.extra=structuredClone(message.swipe_info[id].extra);
+  const capture=observer.capture({eventName:'message_swiped',args:[0]});await capture.ready;
+  assert(capture.records.length>0);assert.equal(confirmed(capture.records,current.chat).remaining.length,0);
+  assert.deepEqual(message.swipes,['first reply','second reply']);
+ }
+});
+
+test('流式 swipe 中手动刷新或页面恢复不能断开已捕获的操作链',async()=>{
+ for(const eventName of ['manual-refresh','lifecycle-resume']){
+  const f=fixture(),message=f.current.chat[0],pending=new Map();let status;
+  Object.assign(message,{swipe_id:0,swipes:[message.mes],swipe_info:[{extra:structuredClone(message.extra)}]});
+  const session={close(){},reconcileChatIdentity:async()=>({status:'unchanged'}),
+   getPendingChanges:async()=>[...pending.values()],putPendingChanges:async rows=>{for(const row of rows)pending.set(row.id,structuredClone(row));},updateChatMetaSummary:async()=>{}};
+  const coordinator=createBackupCoordinator({storage:{open:async()=>session},getContextReader:()=>({readCurrentChat:()=>f.current}),getSettings:()=>({enabled:true}),getLatestStatus:()=>status,setStatus:value=>{status=value;},refreshVisiblePanel:async()=>{},scheduleBackendVerification(){},readChatCatalog:async()=>({ok:true,entries:[]})});
+  coordinator.resetObservation();message.swipe_id=1;
+  const capture=coordinator.captureTrigger({eventName:'message_swiped',args:[0]});
+  await coordinator.runBackupNow({triggers:[{eventName:'message_swiped',args:[0],capture}]});
+  message.mes='stream partial';message.swipes[1]=message.mes;
+  await coordinator.runBackupNow({eventName,args:[]});
+  message.mes='stream complete';message.swipes[1]=message.mes;message.swipe_info[1]={extra:structuredClone(message.extra)};
+  const finish=coordinator.captureTrigger({eventName:'generation_ended',args:[1]});
+  await coordinator.runBackupNow({triggers:[{eventName:'generation_ended',args:[1],capture:finish}]});
+  const rows=[...pending.values()];
+  assert(rows.length>0);assert.equal(confirmed(rows,f.current.chat).remaining.length,0,eventName+' lost a predecessor');
+ }
+});
 
 test('原生收发：早期操作不变，结束时观察全部层，最终文件确认后全部可核销',()=>{
  const f=fixture(),records=turn(f),fingerprints=records.map(pendingRecordFingerprint);

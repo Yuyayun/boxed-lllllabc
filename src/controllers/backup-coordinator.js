@@ -112,7 +112,17 @@ export function createBackupCoordinator({
     }
 
     await prepareBackup();
-    try { if(triggerList.some(item=>item.capture))triggerList=[...triggerList,captureSettledState()];await persistCapturedTriggers(triggerList); }
+    try {
+      // A manual/lifecycle refresh must continue an outstanding journal, too.
+      // Without one, keep the original reset and unknown-change protection.
+      let continueObservation=triggerList.some(item=>item.capture)||unwrittenCaptures.size>0;
+      if(!continueObservation) {
+        const live=getContextReader().readCurrentChat();
+        continueObservation=live.ok&&(await readCurrentPending(live.identity.chatKey)).some(row=>row.pendingFormat);
+      }
+      if(continueObservation)triggerList=[...triggerList,captureSettledState()];
+      await persistCapturedTriggers(triggerList);
+    }
     catch(error) {const status=backupFailureStatus(error);setStatus(status);await refreshVisiblePanel();return status;}
     const contextReader = getContextReader();
     const current = contextReader.readCurrentChat();

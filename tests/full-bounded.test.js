@@ -27,10 +27,21 @@ test('无事件的原地来源变化在最终提交前被拦截', async () => {
 test('完整备份失败仍保存 pending，且后续保存核对不能覆盖失败状态', async () => {
   let written = false, latest;
   const current = { ok: true, chat: [{ mes: 'new' }], identity: { ok: true, chatKey: 'chat', meta: { chatKey: 'chat' } } };
-  const session = { close() {}, reconcileChatIdentity: async () => ({ status: 'current' }), getChatMeta: async () => ({}), putPendingChanges: async () => { written = true; }, getFullMessages: async () => { throw Object.assign(new Error('read limit'), { code: 'too-large' }); } };
+  const session = { close() {}, reconcileChatIdentity: async () => ({ status: 'current' }), getChatMeta: async () => ({}), getPendingChanges: async () => [], putPendingChanges: async () => { written = true; }, getFullMessages: async () => { throw Object.assign(new Error('read limit'), { code: 'too-large' }); } };
   const coordinator = createBackupCoordinator({ storage: { open: async () => session }, getContextReader: () => ({ readCurrentChat: () => current }), getSettings: () => ({ enabled: true, fullBackupEnabled: true, recentBackupEnabled: false, historicalBackupEnabled: false }), getLatestStatus: () => latest, setStatus: value => { latest = value; }, refreshVisiblePanel: async () => {}, readChatCatalog: async () => [] });
   const previous = console.error; console.error = () => {};
   try { await coordinator.runBackupNow({ eventName: 'message_received', args: [0] }); } finally { console.error = previous; }
   assert(written); assert.equal(latest.code, 'backup-update-failed');
   assert.equal((await coordinator.prioritizeFullBackupStatus('chat', { code: 'saved' })).code, 'backup-update-failed');
+});
+
+test('没有待确认操作时手动刷新仍冻结无事件的异常缩短，不把它补记成用户删除',async()=>{
+  const current={ok:true,chat:[{mes:'keep A'},{mes:'keep B'}],identity:{chatKey:'chat',meta:{}}};
+  const full=current.chat.map((row,index)=>canonicalizeMessage(row,index));let meta={},latest;
+  const session={close(){},reconcileChatIdentity:async()=>({status:'current'}),getChatMeta:async()=>meta,getPendingChanges:async()=>[],getFullMessages:async()=>full,
+    updateChatMetaSummary:async(_key,patch)=>{meta={...meta,...patch};},putPendingChanges:async()=>{throw new Error('must not invent a delete');}};
+  const coordinator=createBackupCoordinator({storage:{open:async()=>session},getContextReader:()=>({readCurrentChat:()=>current}),getSettings:()=>({enabled:true,fullBackupEnabled:true}),getLatestStatus:()=>latest,setStatus:value=>{latest=value;},refreshVisiblePanel:async()=>{},readChatCatalog:async()=>({ok:true,entries:[]})});
+  await coordinator.runBackupNow({eventName:'extension-loaded',args:[]});current.chat.pop();
+  await coordinator.runBackupNow({eventName:'manual-refresh',args:[]});
+  assert.equal(latest.code,'full-frozen');assert.equal(meta.fullBackupIncident.kind,'unexpected-shorter-chat');assert.equal(full.length,2);
 });
