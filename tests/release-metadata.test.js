@@ -17,23 +17,28 @@ test("发布元数据指向真实 GitHub 仓库", async () => {
   const changelog = await readProjectFile("CHANGELOG.md");
 
   assert.equal(manifest.homePage, REPOSITORY_URL);
-  assert.equal(manifest.version, "1.0.5-fix.2");
+  assert.equal(manifest.version, "1.0.5-fix");
   assert.equal(packageJson.version, manifest.version);
   assert.equal(packageJson.homepage, REPOSITORY_URL);
   assert.equal(packageJson.repository.url, `git+${REPOSITORY_URL}.git`);
   assert.ok((await readProjectFile("settings.html")).includes(`id="boxed-lllllabc-version">Ver ${manifest.version}</`));
   assert.match(changelog, new RegExp(`^##\\s+${manifest.version.replaceAll(".", "\\.")}(?:\\s|$)`, "m"));
   const announcement = parseVersionChangelog(changelog, manifest.version);
-  assert.equal(announcement?.date, '2026-11-26（开发补修）');
+  assert.equal(announcement?.date, '2026-11-26');
   const announcementText = announcement.blocks.flatMap(block => block.items ?? [block.text]).join('\n');
   assert.match(announcementText, /连续聊天内容恢复/);
-  assert.match(announcementText, /后端 1\.0\.5 可继续配合使用/);
-  assert.match(announcementText, /只读救援/);
-  assert.match(announcementText, /没有自动删库/);
+  assert.match(announcementText, /后端 1\.0\.5 使用/);
+  assert.match(announcementText, /只读导出/);
+  assert.match(announcementText, /只有明确确认放弃旧本地备份后/);
+  assert.match(announcementText, /切后台再返回/);
+  assert.match(announcementText, /运行日志/);
+  assert.match(announcementText, /旧待确认记录/);
+  assert.deepEqual(announcement.blocks.filter(block => block.type === 'heading').map(block => block.text), ['保存与恢复', '本地备份与排查', '更新说明']);
+  assert.doesNotMatch(changelog, /^##\s+1\.0\.5-fix\.[12](?:\s|$)/m);
   const readme = await readProjectFile('README.md');
-  assert.ok(readme.includes(`开发补修：${manifest.version}`));
-  assert.ok(readme.includes('最新正式版：1.0.5'));
-  assert.ok(readme.includes(`${REPOSITORY_URL}/releases/tag/v1.0.5`));
+  assert.ok(readme.includes(`最新正式版：${manifest.version}`));
+  assert.ok(readme.includes(`${REPOSITORY_URL}/releases/tag/v${manifest.version}`));
+  assert.ok(readme.includes(`boxed-lllllabc-v${manifest.version}.zip`));
 });
 
 test("发布元数据注册安装与更新后的自动刷新钩子", async () => {

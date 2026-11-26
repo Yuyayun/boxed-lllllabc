@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import {spawn} from 'node:child_process';
+import {spawn,execFileSync} from 'node:child_process';
 import {pathToFileURL} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import net from 'node:net';
@@ -48,10 +48,14 @@ try{
   return route.continue({url:`http://127.0.0.1:${provider.address().port}/generate`});
  });
  await page.route('**/yellow-audit.js',async route=>route.fulfill({contentType:'text/javascript',body:await fs.readFile(path.join(root,'tests/browser/native-finalization-contract.js'),'utf8')}));
+ let legacyRevision;
  await page.route('**/boxed-yellow-release/src/**',async route=>{
   const relative=new URL(route.request().url()).pathname.split('/boxed-yellow-release/')[1];
   assert(relative.startsWith('src/')&&!relative.split('/').includes('..'));
-  await route.fulfill({contentType:'text/javascript',body:await fs.readFile(path.join(root,'.local-test/boxed-lllllabc-frontend-dev',relative),'utf8')});
+  // Keep the historical fixture independent of the mutable release checkout.
+  legacyRevision??=execFileSync('git',['rev-parse','v1.0.5^{commit}'],{cwd:root,encoding:'utf8',windowsHide:true}).trim();
+  const body=execFileSync('git',['show',legacyRevision+':'+relative],{cwd:root,encoding:'utf8',windowsHide:true});
+  await route.fulfill({contentType:'text/javascript',body});
  });
  let blockSave=false;
  await page.route('**/api/chats/save',route=>blockSave?route.fulfill({status:503,contentType:'application/json',body:'{"error":"isolated audit save block"}'}):route.continue());

@@ -2,15 +2,17 @@
 
 SillyTavern 聊天保存状态与备份扩展，帮助你查看备份、找回丢失或误改的聊天内容。
 
-**最新正式版：1.0.5** · [正式版下载](https://github.com/Yuyayun/boxed-lllllabc/releases/tag/v1.0.5)。完善删除及连续修改后的恢复，核对实际保存结果，并改善空聊天、版本更新和存储故障提示。
+**最新正式版：1.0.5-fix** · [正式版下载](https://github.com/Yuyayun/boxed-lllllabc/releases/tag/v1.0.5-fix)。合并保存确认、候选回复、旧记录恢复、运行日志和浏览器本地故障处理的补修。
 
 只安装前端就能使用浏览器本地备份（IndexedDB）。[服务器插件](https://github.com/Yuyayun/boxed-lllllabc-server)是可选组件；安装后仍由你决定是否切换位置，不会自动迁移，也不会同步两个位置的数据。
 
-开发补修版可在设置的“备份存放位置”查看已连接后端插件实际返回的版本。连接检查失败时显示未连接；后端未提供版本字段时显示版本未知，不会用前端版本代替。
+可在设置的“备份存放位置”查看已连接后端插件实际返回的版本。连接检查失败时显示未连接；后端未提供版本字段时显示版本未知，不会用前端版本代替。
 
-**开发补修：1.0.5-fix.2，尚未发布。** 修复 IndexedDB 目录游标兼容和异常时的事务退出，提供有限只读救援与确认重建入口；保留 1.0.5-fix.1 的连续恢复、完整分支选择、日志及正常收发后的待确认收尾修复。正常更新保留旧备份，不需要清库或重新迁移；只有用户明确放弃旧本地备份后才执行重建。后端 1.0.5 可继续使用，本次不要求升级后端；已有新增恢复过程日志仍需后端 1.0.5-fix.1。详见[本地故障处理与救援文件说明](docs/LOCAL_BACKUP_RECOVERY.md)、[本次验收](docs/acceptance/2026-11-26-indexeddb-recovery.md)、[旧恢复验收](docs/acceptance/2026-11-25-legacy-recovery-fix.md)及[保存收尾验收](docs/acceptance/2026-11-25-pending-finalization.md)。
+本版改善正常回复、候选回复和流式结束后的保存核对，修复生成候选时切后台再返回导致核对无法收尾的问题。
 
-服务器备份请将前后端一并更新至 1.0.5；纯前端仍可独立工作。详情见[实现与验收](docs/acceptance/2026-11-24-pending-recovery.md)及[正式发布核对](docs/acceptance/release-1.0.5.md)。
+正常更新保留原有备份，无需清库或重新迁移。建议前后端一并更新到 1.0.5-fix；前端仍可搭配后端 1.0.5 使用，完整的恢复过程日志需要更新后端。无法核对的旧待确认记录继续保留，不会因更新直接清除。详见[更新日志](CHANGELOG.md)、[本地故障处理与救援文件说明](docs/LOCAL_BACKUP_RECOVERY.md)、[本地存储验收](docs/acceptance/2026-11-26-indexeddb-recovery.md)、[旧恢复验收](docs/acceptance/2026-11-25-legacy-recovery-fix.md)及[候选回复与保存收尾验收](docs/acceptance/2026-11-26-swipe-finalization.md)。
+
+服务器备份建议将前后端一并更新至 1.0.5-fix；纯前端仍可独立工作。详情见[实现与验收](docs/acceptance/2026-11-24-pending-recovery.md)及[正式发布核对](docs/acceptance/release-1.0.5-fix.md)。
 
 升级会保留现有备份和未保存记录。浏览器数据库版本升至 9，防止旧前端误改新版记录；同一浏览器升级后不能直接降回 1.0.4。SQLite schema 仍为 4，存储协议仍为 6，不需要清库或重新迁移。
 
@@ -18,7 +20,7 @@ SillyTavern 聊天保存状态与备份扩展，帮助你查看备份、找回�
 
 ## 安装与更新
 
-在酒馆的扩展安装入口输入本仓库地址，即可安装 main 上的正式版。也可以从正式发布页面下载 `boxed-lllllabc-v1.0.5.zip`，解压后将其中的 `boxed-lllllabc` 目录放到酒馆的：
+在酒馆的扩展安装入口输入本仓库地址，即可安装 main 上的正式版。也可以从正式发布页面下载 `boxed-lllllabc-v1.0.5-fix.zip`，解压后将其中的 `boxed-lllllabc` 目录放到酒馆的：
 
 ```text
 public/scripts/extensions/third-party/boxed-lllllabc
@@ -129,7 +131,7 @@ Git 安装的扩展可在其目录执行 `git pull --ff-only` 更新当前分支
 
 ## 开发记录与许可
 
-[更新日志](CHANGELOG.md) 面向使用者；[本次修复与验收](docs/acceptance/2026-11-21-backup-version-fix.md) 说明本版调整，[docs/acceptance](docs/acceptance/README.md) 保留开发阶段和测试记录。
+[更新日志](CHANGELOG.md) 面向使用者；[正式发布核对](docs/acceptance/release-1.0.5-fix.md) 说明本版调整与验证，[docs/acceptance](docs/acceptance/README.md) 保留开发阶段和测试记录。
 
 作者：**辣白菜 / labaicai0969**。
 
