@@ -1,10 +1,11 @@
 // Keep all cursor continuations in the observed promise chain. A request or
 // callback failure aborts its owning transaction before it can auto-commit.
+import { markIndexedDbError, idbBoundary } from './idb-errors.js';
 const transactions = new WeakMap();
 export const IDB_IDLE_TIMEOUT_MS = 120000;
 
 function failure(message, code, name = 'Error') {
-  return Object.assign(new Error(message), { name, code });
+  return markIndexedDbError(Object.assign(new Error(message), { name, code }));
 }
 
 function transactionOf(source) {
@@ -20,9 +21,9 @@ export function idbRequest(request) {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => {
       try { resolve(request.result); }
-      catch (error) { rejectRequest(request.source, error, reject); }
+      catch (error) { rejectRequest(request.source, markIndexedDbError(error), reject); }
     };
-    request.onerror = () => rejectRequest(request.source, request.error ?? failure('本地备份读取失败。', 'backup-request-failed'), reject);
+    request.onerror = () => rejectRequest(request.source, markIndexedDbError(request.error ?? failure('本地备份读取失败。', 'backup-request-failed')), reject);
   });
 }
 
@@ -31,11 +32,11 @@ export function iterateCursor(source, range, callback, { keyOnly = false, direct
     const fail = error => rejectRequest(source, error, reject);
     let read;
     try { read = keyOnly ? source.openKeyCursor(range, direction) : source.openCursor(range, direction); }
-    catch (error) { fail(error); return; }
-    read.onerror = () => fail(read.error ?? failure('本地备份游标读取失败。', 'backup-request-failed'));
+    catch (error) { fail(markIndexedDbError(error)); return; }
+    read.onerror = () => fail(markIndexedDbError(read.error ?? failure('本地备份游标读取失败。', 'backup-request-failed')));
     read.onsuccess = () => {
       try {
-        const cursor = read.result;
+        const raw = idbBoundary(read).result, cursor = raw && idbBoundary(raw);
         if (!cursor) { resolve(); return; }
         Promise.resolve(callback(cursor)).then(next => {
           if (next === false) resolve();
@@ -54,11 +55,11 @@ export function distinctIndexKeys(source, range, limit = Infinity) {
     function next(query) {
       let read;
       try { read = source.openKeyCursor(query, 'next'); }
-      catch (error) { fail(error); return; }
-      read.onerror = () => fail(read.error ?? failure('本地备份目录读取失败。', 'backup-request-failed'));
+      catch (error) { fail(markIndexedDbError(error)); return; }
+      read.onerror = () => fail(markIndexedDbError(read.error ?? failure('本地备份目录读取失败。', 'backup-request-failed')));
       read.onsuccess = () => {
         try {
-          const cursor = read.result;
+          const raw = idbBoundary(read).result, cursor = raw && idbBoundary(raw);
           if (!cursor) { resolve(keys); return; }
           const key = cursor.key;
           keys.push(key);
@@ -81,7 +82,8 @@ export function runIdbTransaction(db, names, mode, callback, options, {
   idleTimeoutMs = IDB_IDLE_TIMEOUT_MS, setTimer = setTimeout, clearTimer = clearTimeout,
 } = {}) {
   return new Promise((resolve, reject) => {
-    const tx = db.transaction(names, mode, options);
+    let tx;
+    try { tx = db.transaction(names, mode, options); } catch (error) { reject(markIndexedDbError(error)); return; }
     let result, callbackDone = false, originalError, settled = false, abortRequested = false, timer, abortTimer;
     const finish = (outcome, error) => {
       if (settled) return;
@@ -116,11 +118,11 @@ export function runIdbTransaction(db, names, mode, callback, options, {
       if (!callbackDone || originalError) finish('committed', originalError ?? failure('本地备份事务提前结束，操作未完整执行，结果待核对。', 'outcome-unknown'));
       else finish('committed');
     };
-    tx.onerror = event => { originalError ??= tx.error ?? event?.target?.error; };
+    tx.onerror = event => { const error = tx.error ?? event?.target?.error; if (error) originalError ??= markIndexedDbError(error); };
     tx.onabort = () => finish('aborted', originalError ?? tx.error ?? failure('本地备份事务已中止，原数据已保留。', 'backup-transaction-aborted', 'AbortError'));
     touch();
     try {
-      Promise.resolve(callback(tx)).then(value => { result = value; callbackDone = true; }).catch(fail);
+      Promise.resolve(callback(idbBoundary(tx))).then(value => { result = value; callbackDone = true; }).catch(fail);
     } catch (error) { fail(error); }
   });
 }

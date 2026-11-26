@@ -41,10 +41,11 @@ export function createLocalRecoveryUi({ coordinator, getChatKey = () => undefine
   }
   async function retry() {
     if (running) return;
-    running = true; actions.replaceChildren(); message.textContent = '正在重新检查本地备份，尚未恢复自动写入。';
+    running = true; actions.replaceChildren(); message.textContent = '正在分别检查本地备份读取状态。';
     try {
       const state = await coordinator.retry(getChatKey());
       if (state.writePaused) throw new Error('仍有备份写入结果无法确认。可先救援可读数据，或明确放弃旧备份后重建。');
+      if (state.failedReads) throw new Error('部分备份目录或快照列表仍不可读取，故障提示继续保留；当前聊天仍可正常备份。');
       lastError = undefined;
       const notice = document.querySelector('#boxed-lllllabc-local-recovery'); if (notice) notice.hidden = true;
       await onRecovered(); close();

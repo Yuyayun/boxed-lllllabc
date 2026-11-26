@@ -8,18 +8,19 @@ import { BACKUP_BUDGET, boundedRecordSize } from '../storage/backup-batches.js';
 import { BACKUP_STORES } from '../storage/backup-batches.js';
 import { backupVersionKey } from '../storage/backup-versions.js';
 import { idbRequest as requestToPromise, iterateCursor, distinctIndexKeys, runIdbTransaction } from './idb-helpers.js';
+import { markIndexedDbError } from './idb-errors.js';
 
 export const BACKUP_DATABASE_OPEN_TIMEOUT_MS = 5000;
 
 export function openBackupDatabase({ indexedDBImpl=globalThis.indexedDB,timeoutMs=BACKUP_DATABASE_OPEN_TIMEOUT_MS,
   setTimer=globalThis.setTimeout,clearTimer=globalThis.clearTimeout }={}) {
   if (!indexedDBImpl) {
-    return Promise.reject(new Error("IndexedDB 不可用。"));
+    return Promise.reject(markIndexedDbError(new Error("IndexedDB 不可用。")));
   }
 
   return new Promise((resolve, reject) => {
     let request,timer,settled=false;
-    const fail=error=>{if(settled)return;settled=true;clearTimer(timer);reject(databaseOpenError(error));};
+    const fail=error=>{if(settled)return;settled=true;clearTimer(timer);reject(markIndexedDbError(databaseOpenError(error)));};
     try {request = indexedDBImpl.open(DB_NAME, DB_VERSION);}
     catch(error){fail(error);return;}
     // An open queued behind another blocked request may receive no onblocked.

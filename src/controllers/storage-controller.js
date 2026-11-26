@@ -19,13 +19,14 @@ export function createStorageController({
   let latestSnapshot = createStorageSnapshot();
 
   async function refresh({ notify = false } = {}) {
-    let session;
+    let session, presentationFailed = false;
+    const present = callback => { try { return callback(); } catch (error) { presentationFailed = true; throw error; } };
     try {
       await storage.refresh?.();
       const mode = storage.getMode?.() ?? "indexeddb";
       if (latestSnapshot.mode !== mode) {
         latestSnapshot = { mode, loading: true, pressure: "unavailable" };
-        renderOverview?.(latestSnapshot);
+        present(() => renderOverview?.(latestSnapshot));
       }
       if (storage.getMode?.() === "sqlite") {
         const status = await storage.status();
@@ -36,7 +37,7 @@ export function createStorageController({
         latestSnapshot = { ...createStorageSnapshot(), mode: "sqlite", extensionBytes: contentBytes,
           databaseBytes: database.bytes, availableBytes: database.availableBytes,
           readable: database.readable, writable: database.writable };
-        renderOverview?.(latestSnapshot);
+        present(() => renderOverview?.(latestSnapshot));
         return latestSnapshot;
       }
       session = await storage.open();
@@ -50,11 +51,12 @@ export function createStorageController({
       const estimate = await estimateStorage();
       latestSnapshot = createStorageSnapshot({ catalog: { ...catalog, storageBytes: (catalog.storageBytes || 0) + snapshotBytes }, estimate });
       latestSnapshot.mode = "indexeddb";
-      renderOverview?.(latestSnapshot);
-      if (notify) maybeWarn(latestSnapshot);
+      present(() => renderOverview?.(latestSnapshot));
+      if (notify) present(() => maybeWarn(latestSnapshot));
       return latestSnapshot;
     } catch (error) {
       const sqlite = storage.getMode?.() === "sqlite";
+      if (!sqlite && presentationFailed) throw error;
       if (!sqlite) onLocalFailure(error);
       latestSnapshot = createStorageSnapshot({
         failure: sqlite ? { type: "database", shortText: "服务器存储不可用", detail: error.message || "请检查可选服务器插件的连接与权限；未改用浏览器本地存储。" } : describeStorageFailure(error),

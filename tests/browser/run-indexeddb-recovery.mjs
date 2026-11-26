@@ -41,7 +41,8 @@ try {
     try {
       const context = await browser.newContext(), page = await context.newPage(), errors = [];
       let lastCase = '', watchdog;
-      const armWatchdog = () => { clearTimeout(watchdog); watchdog = setTimeout(() => { console.log(`${engine}: 测试无进展，最后测试 ${lastCase}`); browserServer.kill().catch(() => {}); }, 300000); };
+      const stopOwnedBrowser = () => { browserServer.process()?.kill('SIGKILL'); browserServer.kill().catch(() => {}); };
+      const armWatchdog = () => { clearTimeout(watchdog); watchdog = setTimeout(() => { console.log(`${engine}: 测试无进展，最后测试 ${lastCase}`); stopOwnedBrowser(); }, 300000); };
       page.on('console', message => { if (message.text().startsWith('IDB_CASE ')) { lastCase = message.text().slice(9); console.log(`${engine}: ${lastCase}`); armWatchdog(); } else if (message.text().startsWith('IDB_STEP ')) { console.log(`${engine}: ${message.text().slice(9)}`); armWatchdog(); } });
       page.on('pageerror', error => errors.push(error.message));
       await page.goto(`http://127.0.0.1:${server.address().port}/`);
@@ -55,6 +56,22 @@ try {
       await fs.writeFile(path.join(output, 'browser.json'), JSON.stringify(results, null, 2));
       if (errors.length || result.failures.length) process.exitCode = 1;
       await context.close();
+      for (const [flag, file, method, field] of [
+        ['BOXED_TIMEOUT_STRESS', 'indexeddb-timeout-contract', 'runIndexedDbTimeoutContract', 'timeoutStress'],
+        ['BOXED_REVIEW_BUSINESS', 'indexeddb-business-contract', 'runIndexedDbBusinessContract', 'business'],
+      ]) if (process.env[flag] === '1') {
+        const fixture = await browser.newContext(), target = await fixture.newPage();
+        const stressErrors = [], watchdog = setTimeout(() => { console.log(`${engine}: ${field} 测试超过时限`); stopOwnedBrowser(); }, field === 'business' ? 600000 : 240000);
+        target.on('console', message => { if (message.text().startsWith('IDB_STRESS ') || message.text().startsWith('IDB_BUSINESS ')) console.log(`${engine}: ${message.text()}`); });
+        target.on('pageerror', error => stressErrors.push(error.message));
+        try {
+          await target.goto(`http://127.0.0.1:${server.address().port}/`);
+          results.at(-1)[field] = await target.evaluate(async ({ file, method }) => (await import(`/tests/browser/${file}.js`))[method](), { file, method });
+          if (stressErrors.length) throw new Error(stressErrors.join('\n'));
+        } catch (error) { results.at(-1)[`${field}Error`] = error.stack; process.exitCode = 1; }
+        finally { clearTimeout(watchdog); await fixture.close(); }
+        await fs.writeFile(path.join(output, 'browser.json'), JSON.stringify(results, null, 2));
+      }
       if (engine === 'edge' && process.env.BOXED_PERFORMANCE_CHECK === '1') {
         const fixture = await browser.newContext(), target = await fixture.newPage();
         try {
@@ -65,21 +82,26 @@ try {
       }
       if (process.env.BOXED_EXISTING_CONTRACTS === '1' && (engine !== 'webkit' || process.env.BOXED_WEBKIT_REGRESSIONS === '1')) {
         const regressions = [];
+        results.at(-1).regressions = regressions;
+        const selected = process.env.BOXED_REGRESSION_FILES?.split(',');
         for (const [file, method, pathname] of [
           ['backup-version-contract', 'runBackupVersionContract'], ['historical-repair-contract', 'runHistoricalRepairContract'],
           ['legacy-sequence-contract', 'runLegacySequenceContract'], ['pending-journal-contract', 'runPendingJournalContract'],
           ['panel-cleanup-contract', 'runPanelCleanupContract'], ['recovery-log-contract', 'runRecoveryLogContract'],
           ['dataset-contract', 'runDatasetContract', '/dataset-contract'],
         ]) {
+          if (selected && !selected.includes(file)) continue;
           const fixture = await browser.newContext(), target = await fixture.newPage(), pageErrors = [];
+          console.log(`${engine}: 开始 ${file}`);
+          const timeout = setTimeout(() => { console.log(`${engine}: ${file} 超过十分钟时限`); stopOwnedBrowser(); }, 600000);
           target.on('pageerror', error => pageErrors.push(error.message));
           try {
             await target.goto(`http://127.0.0.1:${server.address().port}${pathname ?? '/'}`);
             const checks = await target.evaluate(async ({ file, method }) => (await import(`/tests/browser/${file}.js`))[method](), { file, method });
             regressions.push({ file, checks, pageErrors }); if (pageErrors.length) process.exitCode = 1;
             console.log(`${engine}: ${file} 通过`);
-          } catch (error) { regressions.push({ file, error: error.message, pageErrors }); process.exitCode = 1; }
-          finally { await fixture.close(); }
+          } catch (error) { regressions.push({ file, error: error.message, pageErrors }); console.log(`${engine}: ${file} 未通过 ${error.message.split('\n')[0]}`); process.exitCode = 1; }
+          finally { clearTimeout(timeout); await fixture.close(); await fs.writeFile(path.join(output, 'browser.json'), JSON.stringify(results, null, 2)); }
         }
         results.at(-1).regressions = regressions;
         await fs.writeFile(path.join(output, 'browser.json'), JSON.stringify(results, null, 2));

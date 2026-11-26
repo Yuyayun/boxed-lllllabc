@@ -1,4 +1,5 @@
 import { idbRequest, runIdbTransaction } from '../db/idb-helpers.js';
+import { markIndexedDbError } from '../db/idb-errors.js';
 
 const NAME = "boxed-lllllabc-control";
 const DEFAULT = Object.freeze({ active: "indexeddb", previous: null, lastTransfer: null, journal: null });
@@ -16,7 +17,8 @@ export function validateStorageControl(current) {
 export function createStorageControl({ indexedDB = globalThis.indexedDB, timeoutMs = 5000 } = {}) {
   async function open() {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(NAME, 2);
+      let request;
+      try { request = indexedDB.open(NAME, 2); } catch (error) { reject(markIndexedDbError(error)); return; }
       let blocked = false;
       const timer = setTimeout(() => { blocked = true; reject(Object.assign(new Error('本地存储位置记录长时间没有响应，请关闭其他酒馆页签后重试。'), { code: 'backup-control-unavailable' })); }, timeoutMs);
       request.onupgradeneeded = event => {
@@ -30,7 +32,7 @@ export function createStorageControl({ indexedDB = globalThis.indexedDB, timeout
           read.onsuccess = () => { if (read.result === undefined) store.put(structuredClone(DEFAULT), "current"); };
         }
       };
-      request.onerror = () => { clearTimeout(timer); reject(request.error); };
+      request.onerror = () => { clearTimeout(timer); reject(markIndexedDbError(request.error)); };
       request.onblocked = () => { blocked = true; clearTimeout(timer); reject(Object.assign(new Error("存储控制记录被其他页面阻塞，请关闭其他酒馆页签。"), { code: 'backup-control-unavailable' })); };
       request.onsuccess = () => { clearTimeout(timer); if (blocked) request.result.close(); else { request.result.onversionchange = () => request.result.close(); resolve(request.result); } };
     });

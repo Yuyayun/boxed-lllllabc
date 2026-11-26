@@ -38,6 +38,7 @@ import { openStorageWarningDialog, renderSettingsStorage } from "./src/ui/storag
 import {createRecoveryLogRecorder} from './src/storage/recovery-log.js';
 import { createLocalRecovery } from './src/storage/local-recovery.js';
 import { createLocalRecoveryUi } from './src/ui/local-recovery.js';
+import { isIndexedDbFailure } from './src/db/idb-errors.js';
 
 const extensionName = "boxed-lllllabc";
 const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
@@ -152,7 +153,7 @@ function initializeControllers() {
   };
 
   backupCoordinator = createBackupCoordinator({
-    onStorageFailure: error => { if (!adapters.indexeddb.getRecoveryState().writePaused) adapters.indexeddb.markRecoveryFailure(error); },
+    onStorageFailure: error => { if (backupStorage.getMode() === 'indexeddb' && isIndexedDbFailure(error) && !adapters.indexeddb.getRecoveryState().writePaused) adapters.indexeddb.markRecoveryFailure(error); },
     prepareBackup: async () => { backendVerifier?.clearScheduledVerification(); await backendVerifier?.whenIdle(); },
     storage: backupStorage,
     getContextReader,
@@ -257,7 +258,7 @@ function initializeControllers() {
     renderOverview: renderSettingsStorage,
     showWarning: openStorageWarningDialog,
     openCatalog: () => catalogController?.openCatalog(),
-    onLocalFailure: error => localRecoveryUi?.showFault(error),
+    onLocalFailure: error => { if (isIndexedDbFailure(error)) localRecoveryUi?.showFault(error); },
   });
 }
 
@@ -272,7 +273,7 @@ async function runBackupNow(...args) {
   let status;
   try { status = await operationGate.run(() => backupCoordinator.runBackupNow(...args)); }
   catch (error) {
-    if (backupStorage.getMode() !== 'indexeddb') throw error;
+    if (backupStorage.getMode() !== 'indexeddb' || !isIndexedDbFailure(error)) throw error;
     if (!adapters.indexeddb.getRecoveryState().writePaused) adapters.indexeddb.markRecoveryFailure(error);
     localRecoveryUi?.showFault(error);
     status = createBackupStatus('db-error', '本地备份暂不可用', error); setStatus(status);
@@ -490,7 +491,7 @@ jQuery(async () => {
     await transferCoordinator.recover();
     await switchUi.refresh();
   } catch (error) {
-    localRecoveryUi.showFault(error);
+    if (isIndexedDbFailure(error)) localRecoveryUi.showFault(error);
     storageRecoveryPending = true;
     await operationGate.pause();
     await switchUi.failure(error);

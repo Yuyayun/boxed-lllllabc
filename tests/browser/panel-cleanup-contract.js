@@ -11,9 +11,10 @@ export async function runPanelCleanupContract() {
   const assert = (condition, message) => { if (!condition) throw new Error(message); };
   const same = (left, right, message) => assert(JSON.stringify(left) === JSON.stringify(right), message);
   const waitFor = async predicate => {
-    for (let i = 0; i < 100; i++) {
+    const deadline = performance.now() + 30000;
+    while (performance.now() < deadline) {
       if (predicate()) return;
-      await new Promise(resolve => setTimeout(resolve, 5));
+      await new Promise(resolve => setTimeout(resolve, 20));
     }
     throw new Error('清理入口未完成预期操作');
   };

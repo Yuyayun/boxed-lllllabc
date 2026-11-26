@@ -7,9 +7,12 @@ import { encodeRescueRecord, sealRescueVolume, readRescueVolume } from '../src/s
 import { createOperationGate } from '../src/storage/managed.js';
 import { createBackupCoordinator } from '../src/controllers/backup-coordinator.js';
 import { describeStorageFailure } from '../src/storage/health.js';
+import { markIndexedDbError, isIndexedDbFailure } from '../src/db/idb-errors.js';
+import { readFile } from 'node:fs/promises';
+import { createStorageController } from '../src/controllers/storage-controller.js';
 
 const memoryStore = () => { const data = new Map(); return { getItem: key => data.get(key), setItem: (key, value) => data.set(key, value), removeItem: key => data.delete(key) }; };
-const unknown = () => new DOMException('Unable to open cursor', 'UnknownError');
+const unknown = () => markIndexedDbError(new DOMException('Unable to open cursor', 'UnknownError'));
 
 test('游标同步打开、取结果、回调拒绝和推进异常均拒绝原操作', async () => {
   for (const kind of ['open', 'result', 'callback', 'continue']) {
@@ -83,6 +86,20 @@ test('有凭证的未知提交只有核实 committed 才解除暂停', async () 
   recovery.writeFailed('commitBackupWrite', [{ id: 'synthetic-job' }], Object.assign(unknown(), { backupTransactionOutcome: 'unknown' }));
   await recovery.retry(async id => id ? { state: 'draft' } : undefined); assert.throws(recovery.assertWritable, /暂停/);
   await recovery.retry(async id => id ? { state: 'committed' } : undefined); assert.doesNotThrow(recovery.assertWritable);
+});
+
+test('提交凭证成功不会解除独立连接故障，终态清理所有监听器与计时器', async () => {
+  const recovery = createIndexedDbReadRecovery({ store: memoryStore() });
+  recovery.block(unknown());
+  recovery.writeFailed('commitBackupWrite', [{ id: 'receipt' }], Object.assign(unknown(), { backupTransactionOutcome: 'unknown' }));
+  await recovery.read('getBackupWriteStatus', ['receipt'], async () => ({ state: 'committed' }));
+  assert.equal(recovery.state().unknownWrites.length, 0); assert.throws(recovery.assertWritable);
+  const added = [], removed = [], timers = new Set();
+  const tx = { addEventListener: (...args) => added.push(['tx', ...args]), removeEventListener: (...args) => removed.push(['tx', ...args]) };
+  const db = { transaction: () => tx, addEventListener: (...args) => added.push(['db', ...args]), removeEventListener: (...args) => removed.push(['db', ...args]) };
+  const pending = runIdbTransaction(db, [], 'readonly', () => 'done', undefined, { setTimer: fn => { timers.add(fn); return fn; }, clearTimer: fn => timers.delete(fn) });
+  await Promise.resolve(); tx.oncomplete(); assert.equal(await pending, 'done');
+  assert.equal(timers.size, 0); assert.deepEqual(removed, added);
 });
 
 test('只读旧库打开省略版本，意外升级中止而不创建空库', async () => {
@@ -184,4 +201,95 @@ test('打开阻塞和超时不反复排队重连，持续事件直接复用故�
 test('未知写入与目录错误提示不声称已回滚或未写入', () => {
   assert.equal(describeStorageFailure({ code: 'outcome-unknown', detail: '需要核对' }).shortText, '备份结果待核对');
   assert.equal(describeStorageFailure({ code: 'db-error', detail: '只有目录暂不可读' }).detail, '只有目录暂不可读');
+});
+
+test('目录重试失败保持非关键，逐项保留故障信息与提示', async () => {
+  const notices = [], recovery = createIndexedDbReadRecovery({ store: memoryStore(), delays: [], onFailure: item => notices.push(item) });
+  await assert.rejects(recovery.read('getBackupCatalog', ['catalog'], async () => { throw unknown(); }));
+  await assert.rejects(recovery.retry(async (_id, operation, args) => { if (operation) { assert.deepEqual(args, ['catalog']); throw unknown(); } }));
+  assert.equal(recovery.state().failedReads, 1); assert.equal(recovery.state().writePaused, false); assert.doesNotThrow(recovery.assertWritable);
+  assert(notices.every(item => item.operation === 'getBackupCatalog' && !item.critical));
+  await recovery.retry(async () => {}); assert.equal(recovery.state().failedReads, 0);
+});
+
+test('关键与非关键故障分别解决，部分成功不被其他失败阻挡或清除', async () => {
+  for (const resolveCritical of [true, false]) {
+    const recovery = createIndexedDbReadRecovery({ store: memoryStore(), delays: [] });
+    for (const operation of ['getBackupCatalogPage', 'getChatMeta']) await assert.rejects(recovery.read(operation, [operation], async () => { throw unknown(); }));
+    const visits = [];
+    await assert.rejects(recovery.retry(async (_id, operation) => { if (!operation) return; visits.push(operation); if ((operation === 'getChatMeta') !== resolveCritical) throw unknown(); }));
+    assert.deepEqual(visits, ['getBackupCatalogPage', 'getChatMeta']); assert.equal(recovery.state().failedReads, 1);
+    assert.equal(recovery.state().writePaused, !resolveCritical);
+    await recovery.retry(async () => {}); assert.equal(recovery.state().failedReads, 0); assert.doesNotThrow(recovery.assertWritable);
+  }
+});
+
+test('当前聊天健康检查失败仍检查其他故障项，已恢复目录可独立清除', async () => {
+  const recovery = createIndexedDbReadRecovery({ store: memoryStore(), delays: [] });
+  for (const operation of ['getBackupCatalog', 'getChatMeta']) await assert.rejects(recovery.read(operation, [], async () => { throw unknown(); }));
+  await assert.rejects(recovery.retry(async (_id, operation) => { if (operation !== 'getBackupCatalog') throw unknown(); }));
+  assert.equal(recovery.state().failedReads, 1); assert.throws(recovery.assertWritable);
+  await recovery.retry(async () => {}); assert.doesNotThrow(recovery.assertWritable);
+});
+
+test('目录故障不阻断未知提交凭证检查，凭证也不解除独立关键故障', async () => {
+  const recovery = createIndexedDbReadRecovery({ store: memoryStore(), delays: [] });
+  for (const operation of ['getBackupCatalog', 'getChatMeta']) await assert.rejects(recovery.read(operation, [], async () => { throw unknown(); }));
+  recovery.writeFailed('commitBackupWrite', [{ id: 'receipt' }], Object.assign(unknown(), { backupTransactionOutcome: 'unknown' }));
+  let checked = 0;
+  await assert.rejects(recovery.retry(async (id, operation) => { if (id) { checked++; return { state: 'committed' }; } if (operation) throw unknown(); }));
+  assert.equal(checked, 1); assert.equal(recovery.state().unknownWrites.length, 0); assert.equal(recovery.state().failedReads, 2); assert.throws(recovery.assertWritable);
+  await recovery.retry(async () => {}); assert.doesNotThrow(recovery.assertWritable);
+});
+
+test('真实请求来源可识别 TypeError/AbortError，业务回调和版本冲突不误标', async () => {
+  for (const error of [new TypeError('native'), new DOMException('native', 'AbortError')]) {
+    const request = { source: null, error }, pending = (await import('../src/db/idb-helpers.js')).idbRequest(request);
+    request.onerror(); await assert.rejects(pending); assert.equal(isIndexedDbFailure(error), true);
+  }
+  const ordinary = new TypeError('business'), tx = { abort() { queueMicrotask(() => tx.onabort()); } };
+  await assert.rejects(runIdbTransaction({ transaction: () => tx }, [], 'readwrite', () => { throw ordinary; }));
+  assert.equal(ordinary.backupTransactionOutcome, 'aborted'); assert.equal(isIndexedDbFailure(ordinary), false);
+  const conflict = Object.assign(new Error('version'), { code: 'backup-version-changed' }); markIndexedDbError(conflict); assert.equal(isIndexedDbFailure(conflict), false);
+  const recovery = createIndexedDbReadRecovery({ store: memoryStore(), delays: [] });
+  recovery.writeFailed('applyBackupPatch', [], ordinary); assert.doesNotThrow(recovery.assertWritable);
+});
+
+test('已确认回滚的原生写入失败不升级未知结果，也不锁死后续业务补写', () => {
+  const recovery = createIndexedDbReadRecovery({ store: memoryStore() });
+  for (const name of ['QuotaExceededError', 'DataCloneError', 'UnknownError']) {
+    recovery.writeFailed('putFullMessages', [], Object.assign(markIndexedDbError(new DOMException('aborted', name)), { backupTransactionOutcome: 'aborted' }));
+    assert.equal(recovery.state().unknownWrites.length, 0); assert.doesNotThrow(recovery.assertWritable);
+  }
+});
+
+test('真实外层函数只处理明确存储故障，业务和 UI 异常及 SQLite 原样传播', async () => {
+  const source = await readFile(new URL('../index.js', import.meta.url), 'utf8'), start = source.indexOf('async function runBackupNow('), end = source.indexOf('\nfunction exposeDebugApi()', start);
+  for (const mode of ['indexeddb', 'sqlite']) for (const native of [false, true]) for (const kind of ['context', 'business', 'ui', 'cancel']) {
+    let blocked = false, notices = 0;
+    const error = kind === 'context' ? new TypeError(kind) : kind === 'cancel' ? new DOMException(kind, 'AbortError') : new Error(kind); if (native) markIndexedDbError(error);
+    const run = new Function('operationGate', 'backupStorage', 'adapters', 'localRecoveryUi', 'createBackupStatus', 'setStatus', 'backupCoordinator', 'storageController', 'latestStatus', 'isIndexedDbFailure', `return ${source.slice(start, end)}`)(
+      { isPaused: () => false, run: fn => fn() }, { getMode: () => mode }, { indexeddb: { getRecoveryState: () => ({ writePaused: blocked, unknownWrites: [] }), markRecoveryFailure() { blocked = true; } } },
+      { showFault() { notices++; } }, (code, shortText, detail) => ({ code, shortText, detail }), () => {}, { runBackupNow: async () => { throw error; } }, { handleBackupStatus() {} }, {}, isIndexedDbFailure);
+    if (native && mode === 'indexeddb') { assert.equal((await run()).code, 'db-error'); assert(blocked); assert.equal(notices, 1); }
+    else { await assert.rejects(run, value => value === error); assert(!blocked); assert.equal(notices, 0); }
+  }
+  const callbackSource = source.match(/onStorageFailure: (error => \{[^\n]+\}),/)[1];
+  for (const mode of ['indexeddb', 'sqlite']) for (const native of [false, true]) {
+    let paused = false;
+    const callback = new Function('backupStorage', 'adapters', 'isIndexedDbFailure', `return ${callbackSource}`)(
+      { getMode: () => mode }, { indexeddb: { getRecoveryState: () => ({ writePaused: paused }), markRecoveryFailure: () => { paused = true; } } }, isIndexedDbFailure);
+    callback(native ? markIndexedDbError(new TypeError('native')) : new TypeError('business'));
+    assert.equal(paused, mode === 'indexeddb' && native);
+  }
+});
+
+test('本地存储概览重绘异常原样传播，不伪造数据库故障或救援提示', async () => {
+  let failRender = false, failures = 0, closed = 0;
+  const error = new TypeError('synthetic render failure');
+  const controller = createStorageController({ storage: { getMode: () => 'indexeddb', open: async () => ({ getBackupCatalog: async () => ({ chats: [], storageBytes: 0 }), close() { closed++; } }) },
+    estimateStorage: async () => ({}), renderOverview() { if (failRender) throw error; }, onLocalFailure() { failures++; } });
+  await controller.refresh(); failRender = true;
+  await assert.rejects(controller.refresh(), value => value === error);
+  assert.equal(failures, 0); assert.equal(controller.getSnapshot().failure, null); assert.equal(closed, 2);
 });
